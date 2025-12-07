@@ -3,9 +3,9 @@ Add your Character Expressions on your Chats!
 
 ## Preview
 
-![Chat Example](https://i.imgur.com/3YgK5Qm.png)
+![Chat Example](https://i.imgur.com/1.png)
 
-![Extension Settings](https://i.imgur.com/xqZJF9L.png)
+![Extension Settings](https://i.imgur.com/2.png)
 
 ## How to use:
 
