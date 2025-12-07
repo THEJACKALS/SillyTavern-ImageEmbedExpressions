@@ -1,0 +1,11 @@
+{
+    "display_name": "Image Embeds Expressions",
+    "loading_order": 28,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Codex",
+    "version": "0.1.0",
+    "homePage": "https://github.com/SillyTavern/SillyTavern"
+}
