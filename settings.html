@@ -19,8 +19,9 @@
         </div>
         <div id="image_embeds_list" class="image-embeds-list"></div>
         <p class="hint">
-            <span>Per-character. Placeholder: </span><code>{{img::expression_name}}</code>
-            <span>. The image will be injected into the chat when a placeholder is found (underscore/slash are considered the same). You can select multiple files at once when adding.</span>
+            <span>1. Per-character using this Placeholder: </span><code>{{img::expression_name}}</code> automatically.<br>
+            <span>2. For multi-character chats, Use name expressions as like this <code>NameChar/pose</code> or <code>NameChar_pose</code> and can use any separator (also accepts <code>\</code>, <code>-</code>, <code>|</code>)</span><br>
+            <span>e.g., <code>Evelyn/smile</code>, <code>Violet-huhu</code>, <code>Miko|focused</code> so auto-detect can pick the right character.</span>
         </p>
         <input type="file" id="image_embeds_file_input" accept="image/*" multiple hidden>
     </div>

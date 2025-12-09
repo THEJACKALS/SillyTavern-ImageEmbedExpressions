@@ -1,13 +1,28 @@
-import { characters, chat, eventSource, event_types, saveSettingsDebounced, this_chid } from '../../../script.js';
-import { extension_settings, renderExtensionTemplateAsync } from '../../extensions.js';
-import { getBase64Async, getFileExtension, getStringHash, saveBase64AsFile } from '../../utils.js';
+import { characters, chat, eventSource, event_types, saveSettingsDebounced, this_chid } from '/script.js';
+import { extension_settings, renderExtensionTemplateAsync } from '/scripts/extensions.js';
+import { getBase64Async, getFileExtension, getStringHash, saveBase64AsFile } from '/scripts/utils.js';
 
+const EXTENSION_ID = (() => {
+    const match = new URL(import.meta.url).pathname.match(/scripts\/extensions\/(.+)\/index\.js$/);
+    if (match?.[1]) {
+        return match[1];
+    }
+
+    // Fallback: prefer third-party path when loaded from user extensions
+    const isThirdParty = import.meta.url.includes('/third-party/');
+    return isThirdParty ? 'third-party/image-embeds-expressions' : 'image-embeds-expressions';
+})();
 const SETTINGS_KEY = 'imageEmbedsExpressions';
 const STORAGE_FOLDER = 'image-embeds-expressions';
 const PLACEHOLDER_REGEX = /\{\{img::(.*?)\}\}/gi;
 const CODE_TAGS = new Set(['code', 'pre', 'samp', 'kbd']);
 const defaultSettings = { characters: {}, enabled: true };
+const DEFAULT_CHARACTER_GROUP = '__default__';
 let lastAssistantMessageId = null;
+
+function escapeRegExp(value) {
+    return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function rememberAssistantMessage(messageId) {
     const numericId = Number(messageId);
@@ -96,6 +111,126 @@ function normalizeName(name) {
 function findEntryByName(name) {
     const target = normalizeName(name);
     return getCharacterEntries().find(entry => normalizeName(entry.name) === target);
+}
+
+function parseEntryName(name) {
+    const raw = String(name ?? '').trim();
+    const splitMatch = raw.match(/^(?<character>[^\/\\|\-_]+)[\/\\|\-_]+(?<expression>.+)$/);
+    const character = splitMatch?.groups?.character ? normalizeName(splitMatch.groups.character) : '';
+    const expression = splitMatch?.groups?.expression || raw;
+
+    return {
+        raw,
+        character,
+        expression,
+        normalized: normalizeName(raw),
+    };
+}
+
+function groupEntriesByCharacter(entries) {
+    const groups = new Map();
+
+    for (const entry of entries) {
+        const parsed = parseEntryName(entry.name);
+        const key = parsed.character || DEFAULT_CHARACTER_GROUP;
+        const bucket = groups.get(key) || [];
+        bucket.push({ entry, parsed });
+        groups.set(key, bucket);
+    }
+
+    return groups;
+}
+
+function detectCharacterFromText(text, characters) {
+    const lowerText = String(text || '').toLowerCase();
+    const cleaned = lowerText.replace(/[^\w\s]/g, ' ');
+    const presenceVerbs = ['said', 'says', 'ask', 'asked', 'asks', 'reply', 'replied', 'replies', 'respond', 'responded', 'responds', 'yell', 'yelled', 'yells', 'shout', 'shouted', 'shouts', 'whisper', 'whispered', 'whispers', 'mutter', 'muttered', 'mutters', 'laughed', 'laughs', 'laughing', 'smiled', 'smiles', 'smiling', 'nodded', 'nods', 'grinned', 'grins', 'grinning', 'looked', 'looks', 'looking', 'turned', 'turns', 'walking', 'walked', 'walks', 'stood', 'stands', 'standing', 'sat', 'sits', 'sitting'];
+    const imaginationHints = ['memory of', 'remembering', 'image of', 'imagination of', 'imagining', 'fantasy of', 'thinking of', 'thought of', 'dream of', 'dreaming of', 'idea of', 'vision of'];
+    let best = null;
+
+    for (const character of characters) {
+        const plainName = character.replace(/_/g, ' ').trim();
+        if (!plainName) continue;
+
+        const wordPattern = new RegExp(`\\b${escapeRegExp(plainName)}\\b`, 'g');
+        const speakingPattern = new RegExp(`(^|\\n)\\s*${escapeRegExp(plainName)}\\s*[:\\-\\u2013\\u2014]`, 'g');
+        let score = 0;
+        let firstIndex = Infinity;
+        let match;
+
+        while ((match = wordPattern.exec(cleaned)) !== null) {
+            score += 1;
+            if (match.index < firstIndex) {
+                firstIndex = match.index;
+            }
+
+            const window = lowerText.slice(Math.max(0, match.index - 24), match.index + plainName.length + 24);
+            if (presenceVerbs.some(v => new RegExp(`\\b${escapeRegExp(v)}\\b`).test(window))) {
+                score += 1;
+            }
+            if (imaginationHints.some(h => window.includes(h))) {
+                score -= 1;
+            }
+        }
+
+        while ((match = speakingPattern.exec(lowerText)) !== null) {
+            score += 2;
+            if (match.index < firstIndex) {
+                firstIndex = match.index;
+            }
+        }
+
+        if (firstIndex === 0) {
+            score += 1;
+        }
+
+        score = Math.max(score, 0);
+
+        if (score > 0 && (!best || score > best.score || (score === best.score && firstIndex < best.firstIndex))) {
+            best = { character, score, firstIndex };
+        }
+    }
+
+    return best?.character || null;
+}
+
+function selectEntryForCharacter(groups, characterKey, messageText) {
+    const entries = groups.get(characterKey) || [];
+    if (!entries.length) return null;
+
+    const cleaned = String(messageText || '').toLowerCase().replace(/[^\w\s]/g, ' ');
+
+    for (const { entry, parsed } of entries) {
+        const needles = [
+            parsed.normalized.replace(/_/g, ' ').trim(),
+            normalizeName(parsed.expression).replace(/_/g, ' ').trim(),
+        ].filter(Boolean);
+
+        if (needles.some(needle => cleaned.includes(needle))) {
+            return entry;
+        }
+    }
+
+    return entries[0].entry;
+}
+
+function findEntryMatchInText(entries, messageText) {
+    const cleaned = String(messageText || '').toLowerCase().replace(/[^\w\s]/g, ' ');
+
+    for (const entry of entries) {
+        const parsed = parseEntryName(entry.name);
+        const needles = [
+            normalizeName(parsed.raw).replace(/_/g, ' '),
+            normalizeName(parsed.expression).replace(/_/g, ' '),
+            parsed.character?.replace(/_/g, ' '),
+        ].filter(Boolean);
+
+        if (needles.some(needle => cleaned.includes(needle))) {
+            return entry;
+        }
+    }
+
+    return null;
 }
 
 function buildPlaceholder(name) {
@@ -233,23 +368,34 @@ function pickEntryForMessage(messageId) {
     if (!entries.length) return null;
 
     const messageText = String(message.mes || '').toLowerCase();
-    const cleaned = messageText.replace(/[^\w\s]/g, ' ');
+    const grouped = groupEntriesByCharacter(entries);
+    const characterKeys = Array.from(grouped.keys()).filter(key => key && key !== DEFAULT_CHARACTER_GROUP);
+    const detectedCharacter = characterKeys.length ? detectCharacterFromText(messageText, characterKeys) : null;
+    const hasMultipleCharacters = characterKeys.length > 1;
 
-    for (const entry of entries) {
-        const norm = normalizeName(entry.name);
-        if (!norm) continue;
-        const needle = norm.replace(/_/g, ' ');
-        if (cleaned.includes(needle)) {
-            return entry;
-        }
+    if (detectedCharacter) {
+        const entry = selectEntryForCharacter(grouped, detectedCharacter, messageText);
+        if (entry) return entry;
     }
 
-    return entries[0];
+    if (hasMultipleCharacters) {
+        return null;
+    }
+
+    const directMatch = findEntryMatchInText(entries, messageText);
+    if (directMatch) return directMatch;
+
+    return selectEntryForCharacter(grouped, characterKeys[0] || DEFAULT_CHARACTER_GROUP, messageText) || null;
 }
 
 function insertPlaceholderNearMatch(root, entry) {
     const token = buildPlaceholder(entry.name);
-    const normNeedle = normalizeName(entry.name).replace(/_/g, ' ');
+    const parsed = parseEntryName(entry.name);
+    const needles = [
+        normalizeName(entry.name).replace(/_/g, ' '),
+        parsed.character?.replace(/_/g, ' '),
+        normalizeName(parsed.expression).replace(/_/g, ' '),
+    ].filter(Boolean);
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let targetNode = null;
 
@@ -257,7 +403,7 @@ function insertPlaceholderNearMatch(root, entry) {
         const node = walker.nextNode();
         if (!node) break;
         const text = (node.nodeValue || '').toLowerCase();
-        if (text.includes(normNeedle)) {
+        if (needles.some(needle => text.includes(needle))) {
             targetNode = node;
             break;
         }
@@ -474,7 +620,7 @@ function bindUi() {
 
 async function injectSettingsUi() {
     if ($('#image_embeds_expressions_container').length) return;
-    const settingsHtml = $(await renderExtensionTemplateAsync('image-embeds-expressions', 'settings'));
+    const settingsHtml = $(await renderExtensionTemplateAsync(EXTENSION_ID, 'settings'));
     const container = $('<div class="extension_container" id="image_embeds_expressions_container"></div>');
     container.append(settingsHtml);
     $('#extensions_settings2').append(container);
