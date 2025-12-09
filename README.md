@@ -10,5 +10,7 @@ Add your Character Expressions on your Chats!
 
 
 ## How to use:
-- In the SillyTavern Extension Manager, use "Install from URL" and paste the following Git URL: ```https://github.com/THEJACKALS/SillyTavern-ImageEmbedExpressions.git```
-- Or... In Manual Options, Add this extension to the program in your SillyTavern file at "SillyTavern\data\default-user\extensions\SillyTavern-ImageEmbedExpressions"
+- In the SillyTavern Extension Manager, use "Install from URL" and paste the following Git URL: 
+```https://github.com/THEJACKALS/SillyTavern-ImageEmbedExpressions.git```
+- Or... In Manual Options, Add this extension to the program in your SillyTavern file at 
+```"SillyTavern\data\default-user\extensions\SillyTavern-ImageEmbedExpressions"```
