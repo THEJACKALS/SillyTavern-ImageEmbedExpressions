@@ -14,4 +14,9 @@ Add your Character Expressions on your Chats!
 2. enjoy!
 <img width="450" height="876" alt="1" src="https://github.com/user-attachments/assets/f80bc311-db12-4213-8045-19cedd8d0c36" /> 
 
-
+3. if you want to use the double Expressions feature
+   
+  - Checklist Enabled Double Expressions
+<img width="465" height="131" alt="image" src="https://github.com/user-attachments/assets/ae102130-2055-4348-b56d-feca0e766a09" />
+  - Enjoy with your double char Expressions 
+<img width="417" height="775" alt="image" src="https://github.com/user-attachments/assets/fd03737a-3b99-4c70-bf85-5b38be8a6c3a" />
