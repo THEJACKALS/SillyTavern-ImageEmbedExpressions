@@ -16,7 +16,7 @@ const SETTINGS_KEY = 'imageEmbedsExpressions';
 const STORAGE_FOLDER = 'image-embeds-expressions';
 const PLACEHOLDER_REGEX = /\{\{img::(.*?)\}\}/gi;
 const CODE_TAGS = new Set(['code', 'pre', 'samp', 'kbd']);
-const defaultSettings = { characters: {}, enabled: true };
+const defaultSettings = { characters: {}, enabled: true, doubleEnabled: false };
 const DEFAULT_CHARACTER_GROUP = '__default__';
 let lastAssistantMessageId = null;
 
@@ -60,6 +60,10 @@ function ensureSettings() {
 
     if (typeof extension_settings[SETTINGS_KEY].enabled !== 'boolean') {
         extension_settings[SETTINGS_KEY].enabled = true;
+    }
+
+    if (typeof extension_settings[SETTINGS_KEY].doubleEnabled !== 'boolean') {
+        extension_settings[SETTINGS_KEY].doubleEnabled = false;
     }
 
     return extension_settings[SETTINGS_KEY];
@@ -127,6 +131,15 @@ function parseEntryName(name) {
     };
 }
 
+function buildNeedles(entry) {
+    const parsed = parseEntryName(entry.name);
+    return [
+        normalizeName(entry.name).replace(/_/g, ' '),
+        parsed.character?.replace(/_/g, ' '),
+        normalizeName(parsed.expression).replace(/_/g, ' '),
+    ].filter(Boolean);
+}
+
 function groupEntriesByCharacter(entries) {
     const groups = new Map();
 
@@ -142,11 +155,16 @@ function groupEntriesByCharacter(entries) {
 }
 
 function detectCharacterFromText(text, characters) {
+    const scored = scoreCharacters(text, characters);
+    return scored[0]?.character || null;
+}
+
+function scoreCharacters(text, characters) {
     const lowerText = String(text || '').toLowerCase();
     const cleaned = lowerText.replace(/[^\w\s]/g, ' ');
     const presenceVerbs = ['said', 'says', 'ask', 'asked', 'asks', 'reply', 'replied', 'replies', 'respond', 'responded', 'responds', 'yell', 'yelled', 'yells', 'shout', 'shouted', 'shouts', 'whisper', 'whispered', 'whispers', 'mutter', 'muttered', 'mutters', 'laughed', 'laughs', 'laughing', 'smiled', 'smiles', 'smiling', 'nodded', 'nods', 'grinned', 'grins', 'grinning', 'looked', 'looks', 'looking', 'turned', 'turns', 'walking', 'walked', 'walks', 'stood', 'stands', 'standing', 'sat', 'sits', 'sitting'];
     const imaginationHints = ['memory of', 'remembering', 'image of', 'imagination of', 'imagining', 'fantasy of', 'thinking of', 'thought of', 'dream of', 'dreaming of', 'idea of', 'vision of'];
-    let best = null;
+    const results = [];
 
     for (const character of characters) {
         const plainName = character.replace(/_/g, ' ').trim();
@@ -156,10 +174,12 @@ function detectCharacterFromText(text, characters) {
         const speakingPattern = new RegExp(`(^|\\n)\\s*${escapeRegExp(plainName)}\\s*[:\\-\\u2013\\u2014]`, 'g');
         let score = 0;
         let firstIndex = Infinity;
+        let mentionCount = 0;
         let match;
 
         while ((match = wordPattern.exec(cleaned)) !== null) {
             score += 1;
+            mentionCount += 1;
             if (match.index < firstIndex) {
                 firstIndex = match.index;
             }
@@ -186,12 +206,16 @@ function detectCharacterFromText(text, characters) {
 
         score = Math.max(score, 0);
 
-        if (score > 0 && (!best || score > best.score || (score === best.score && firstIndex < best.firstIndex))) {
-            best = { character, score, firstIndex };
+        if (score > 0) {
+            results.push({ character, score, firstIndex, mentionCount });
         }
     }
 
-    return best?.character || null;
+    return results.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        if (a.firstIndex !== b.firstIndex) return a.firstIndex - b.firstIndex;
+        return (b.mentionCount || 0) - (a.mentionCount || 0);
+    });
 }
 
 function selectEntryForCharacter(groups, characterKey, messageText) {
@@ -231,6 +255,104 @@ function findEntryMatchInText(entries, messageText) {
     }
 
     return null;
+}
+
+function splitParagraphsWithOffsets(text) {
+    const value = String(text || '');
+    const paragraphs = [];
+    const regex = /[^\r\n]+/g;
+    let match;
+
+    while ((match = regex.exec(value)) !== null) {
+        const raw = match[0];
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+        const start = match.index;
+        const end = start + raw.length;
+        paragraphs.push({ text: trimmed, start, end });
+    }
+
+    return paragraphs;
+}
+
+function analyzeParagraphDominance(text, characterKeys) {
+    const paragraphs = splitParagraphsWithOffsets(text);
+    const assignments = paragraphs.map(paragraph => {
+        const scores = scoreCharacters(paragraph.text, characterKeys);
+        const top = scores[0];
+        return {
+            ...paragraph,
+            character: top?.score > 0 ? top.character : null,
+            score: top?.score || 0,
+        };
+    });
+
+    const counts = new Map();
+    const blocks = [];
+    let currentBlock = null;
+
+    for (const paragraph of assignments) {
+        if (!paragraph.character) {
+            currentBlock = null;
+            continue;
+        }
+
+        if (!currentBlock || currentBlock.character !== paragraph.character) {
+            currentBlock = {
+                character: paragraph.character,
+                start: paragraph.start,
+                end: paragraph.end,
+                count: 1,
+                score: paragraph.score,
+            };
+            blocks.push(currentBlock);
+        } else {
+            currentBlock.end = paragraph.end;
+            currentBlock.count += 1;
+            currentBlock.score += paragraph.score;
+        }
+
+        counts.set(paragraph.character, (counts.get(paragraph.character) || 0) + 1);
+    }
+
+    const firstChar = assignments.find(p => p.character)?.character || null;
+    const lastChar = [...assignments].reverse().find(p => p.character)?.character || null;
+    const sortedCounts = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+    const primary = sortedCounts[0]?.[0] || null;
+    const secondary = sortedCounts[1]?.[0] || null;
+    const totalParagraphs = paragraphs.length || 1;
+    const primaryCount = primary ? counts.get(primary) || 0 : 0;
+    const secondaryCount = secondary ? counts.get(secondary) || 0 : 0;
+    const isSingleDominant = !!primary && firstChar === primary && lastChar === primary && primaryCount >= totalParagraphs * 0.6 && primaryCount >= Math.max(secondaryCount * 1.5, 1);
+    const blocksByCharacter = new Map();
+
+    for (const block of blocks) {
+        const arr = blocksByCharacter.get(block.character) || [];
+        arr.push(block);
+        blocksByCharacter.set(block.character, arr);
+    }
+
+    return {
+        assignments,
+        blocksByCharacter,
+        counts,
+        primary,
+        secondary,
+        isSingleDominant,
+    };
+}
+
+function pickDominantBlock(blocksByCharacter, character) {
+    const blocks = blocksByCharacter.get(character) || [];
+    if (!blocks.length) return null;
+    const sorted = blocks.slice().sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        const spanA = a.end - a.start;
+        const spanB = b.end - b.start;
+        if (spanB !== spanA) return spanB - spanA;
+        return a.start - b.start;
+    });
+    return sorted[0];
 }
 
 function buildPlaceholder(name) {
@@ -360,42 +482,98 @@ function replaceTextNode(textNode) {
     textNode.replaceWith(fragment);
 }
 
-function pickEntryForMessage(messageId) {
+function pickEntriesForMessage(messageId, allowMultiple = false) {
     const message = chat?.[messageId];
-    if (!message || message.is_user || message.is_system) return null;
+    if (!message || message.is_user || message.is_system) return [];
 
     const entries = getCharacterEntries();
-    if (!entries.length) return null;
+    if (!entries.length) return [];
 
-    const messageText = String(message.mes || '').toLowerCase();
+    const messageTextRaw = String(message.mes || '');
+    const messageText = messageTextRaw.toLowerCase();
     const grouped = groupEntriesByCharacter(entries);
     const characterKeys = Array.from(grouped.keys()).filter(key => key && key !== DEFAULT_CHARACTER_GROUP);
-    const detectedCharacter = characterKeys.length ? detectCharacterFromText(messageText, characterKeys) : null;
-    const hasMultipleCharacters = characterKeys.length > 1;
+    const characterScores = characterKeys.length ? scoreCharacters(messageText, characterKeys) : [];
+    const dominance = analyzeParagraphDominance(messageTextRaw, characterKeys);
+    const selected = [];
+    let maxCount = allowMultiple ? 2 : 1;
 
-    if (detectedCharacter) {
-        const entry = selectEntryForCharacter(grouped, detectedCharacter, messageText);
-        if (entry) return entry;
+    if (allowMultiple && characterScores.length > 1) {
+        const primaryScore = characterScores[0];
+        const secondaryScore = characterScores[1];
+        if (!secondaryScore || secondaryScore.score < 1 || (primaryScore && secondaryScore.score < primaryScore.score * 0.5)) {
+            maxCount = 1;
+        }
     }
 
-    if (hasMultipleCharacters) {
-        return null;
+    if (dominance.isSingleDominant) {
+        maxCount = 1;
+    }
+
+    const seenEntries = new Set();
+    const desiredCharacters = [];
+
+    if (dominance.primary) {
+        desiredCharacters.push(dominance.primary);
+    } else if (characterScores[0]) {
+        desiredCharacters.push(characterScores[0].character);
+    }
+
+    if (allowMultiple && !dominance.isSingleDominant) {
+        const secondaryCandidate = dominance.secondary || characterScores[1]?.character;
+        if (secondaryCandidate && secondaryCandidate !== desiredCharacters[0]) {
+            desiredCharacters.push(secondaryCandidate);
+        }
+    }
+
+    for (const character of desiredCharacters) {
+        const entry = selectEntryForCharacter(grouped, character, messageText);
+        const key = entry ? (entry.id || entry.url || entry.name) : null;
+        if (entry && !seenEntries.has(key)) {
+            const block = pickDominantBlock(dominance.blocksByCharacter, character);
+            const targetOffset = block ? (block.start + block.end) / 2 : null;
+            selected.push({ entry, character, targetOffset });
+            seenEntries.add(key);
+        }
+        if (selected.length >= maxCount) break;
+    }
+
+    if (selected.length >= maxCount) {
+        return selected;
     }
 
     const directMatch = findEntryMatchInText(entries, messageText);
-    if (directMatch) return directMatch;
+    const directKey = directMatch ? (directMatch.id || directMatch.url || directMatch.name) : null;
+    if (directMatch && !seenEntries.has(directKey)) {
+        const parsed = parseEntryName(directMatch.name);
+        const block = pickDominantBlock(dominance.blocksByCharacter, parsed.character);
+        const targetOffset = block ? (block.start + block.end) / 2 : null;
+        selected.push({ entry: directMatch, character: parsed.character, targetOffset });
+        seenEntries.add(directKey);
+        if (selected.length >= maxCount) {
+            return selected;
+        }
+    }
 
-    return selectEntryForCharacter(grouped, characterKeys[0] || DEFAULT_CHARACTER_GROUP, messageText) || null;
+    const disambiguationNeeded = grouped.size > 1 || entries.length > 1;
+    if (disambiguationNeeded) {
+        return selected;
+    }
+
+    const fallbackEntry = selectEntryForCharacter(grouped, characterKeys[0] || DEFAULT_CHARACTER_GROUP, messageText);
+    const fallbackKey = fallbackEntry ? (fallbackEntry.id || fallbackEntry.url || fallbackEntry.name) : null;
+    if (fallbackEntry && !seenEntries.has(fallbackKey)) {
+        const block = pickDominantBlock(dominance.blocksByCharacter, characterKeys[0]);
+        const targetOffset = block ? (block.start + block.end) / 2 : null;
+        selected.push({ entry: fallbackEntry, character: characterKeys[0], targetOffset });
+    }
+
+    return selected.slice(0, maxCount);
 }
 
 function insertPlaceholderNearMatch(root, entry) {
     const token = buildPlaceholder(entry.name);
-    const parsed = parseEntryName(entry.name);
-    const needles = [
-        normalizeName(entry.name).replace(/_/g, ' '),
-        parsed.character?.replace(/_/g, ' '),
-        normalizeName(parsed.expression).replace(/_/g, ' '),
-    ].filter(Boolean);
+    const needles = buildNeedles(entry);
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let targetNode = null;
 
@@ -417,6 +595,134 @@ function insertPlaceholderNearMatch(root, entry) {
     }
 }
 
+function collectTextNodesWithOffsets(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let currentOffset = 0;
+    let node;
+
+    while ((node = walker.nextNode())) {
+        const text = node.nodeValue || '';
+        const length = text.length;
+        nodes.push({
+            node,
+            start: currentOffset,
+            end: currentOffset + length,
+            textLower: text.toLowerCase(),
+        });
+        currentOffset += length;
+    }
+
+    return nodes;
+}
+
+function findBestNodeForOffset(nodes, offset, usedNodes) {
+    let candidate = null;
+    let bestDistance = Infinity;
+
+    for (const meta of nodes) {
+        if (usedNodes.has(meta.node)) continue;
+        if (offset >= meta.start && offset <= meta.end) {
+            return meta.node;
+        }
+        const distance = offset < meta.start ? meta.start - offset : offset - meta.end;
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            candidate = meta.node;
+        }
+    }
+
+    return candidate;
+}
+
+function findNodeMatchingNeedles(nodes, entry, usedNodes) {
+    const needles = buildNeedles(entry);
+    for (const meta of nodes) {
+        if (usedNodes.has(meta.node)) continue;
+        if (needles.some(needle => meta.textLower.includes(needle))) {
+            return meta.node;
+        }
+    }
+    return null;
+}
+
+function insertPlaceholdersSequential(root, entries) {
+    if (!entries?.length) return;
+    const nodes = collectTextNodesWithOffsets(root);
+    let minOffset = 0;
+    const usedNodes = new Set();
+
+    for (const entry of entries) {
+        const token = buildPlaceholder(entry.name);
+        const needles = buildNeedles(entry);
+        let chosen = null;
+
+        for (const meta of nodes) {
+            if (meta.end < minOffset) continue;
+            if (usedNodes.has(meta.node)) continue;
+            if (needles.some(needle => meta.textLower.includes(needle))) {
+                chosen = meta.node;
+                break;
+            }
+        }
+
+        if (!chosen) {
+            for (const meta of nodes) {
+                if (usedNodes.has(meta.node)) continue;
+                if (needles.some(needle => meta.textLower.includes(needle))) {
+                    chosen = meta.node;
+                    break;
+                }
+            }
+        }
+
+        const textNode = document.createTextNode(`\n${token}\n`);
+        if (chosen && chosen.parentNode) {
+            chosen.parentNode.insertBefore(textNode, chosen.nextSibling);
+            usedNodes.add(chosen);
+            const meta = nodes.find(n => n.node === chosen);
+            if (meta) {
+                minOffset = meta.end;
+            }
+        } else {
+            root.append(textNode);
+        }
+    }
+}
+
+function insertPlaceholdersWithTargets(root, placements) {
+    if (!placements?.length) return;
+    const nodes = collectTextNodesWithOffsets(root);
+    const usedNodes = new Set();
+    const ordered = [...placements].sort((a, b) => {
+        const aOffset = Number.isFinite(a.targetOffset) ? a.targetOffset : Infinity;
+        const bOffset = Number.isFinite(b.targetOffset) ? b.targetOffset : Infinity;
+        return aOffset - bOffset;
+    });
+
+    for (const placement of ordered) {
+        const entry = placement.entry;
+        const token = buildPlaceholder(entry.name);
+        let targetNode = null;
+
+        if (Number.isFinite(placement.targetOffset)) {
+            targetNode = findBestNodeForOffset(nodes, placement.targetOffset, usedNodes);
+        }
+
+        if (!targetNode) {
+            targetNode = findNodeMatchingNeedles(nodes, entry, usedNodes);
+        }
+
+        const textNode = document.createTextNode(`\n${token}\n`);
+        if (targetNode && targetNode.parentNode) {
+            targetNode.parentNode.insertBefore(textNode, targetNode.nextSibling);
+            usedNodes.add(targetNode);
+        } else {
+            root.append(textNode);
+        }
+    }
+}
+
 function autoInjectAfterGeneration(root, messageId) {
     const settings = ensureSettings();
     if (!settings.enabled) return;
@@ -435,10 +741,20 @@ function autoInjectAfterGeneration(root, messageId) {
     const hasPlaceholder = PLACEHOLDER_REGEX.test(root.textContent || '');
     if (hasPlaceholder) return;
 
-    const entry = pickEntryForMessage(messageId);
-    if (!entry) return;
+    const placements = pickEntriesForMessage(messageId, settings.doubleEnabled);
+    if (!placements.length) return;
 
-    insertPlaceholderNearMatch(root, entry);
+    const uniqueEntries = [];
+    const seenIds = new Set();
+    for (const placement of placements) {
+        const entry = placement.entry;
+        const key = entry.id || entry.name || entry.url;
+        if (seenIds.has(key)) continue;
+        seenIds.add(key);
+        uniqueEntries.push(placement);
+    }
+
+    insertPlaceholdersWithTargets(root, uniqueEntries);
     renderPlaceholders(root);
 }
 
@@ -616,6 +932,11 @@ function bindUi() {
         ensureSettings().enabled = !!event.target.checked;
         saveSettingsDebounced();
     });
+
+    $('#image_embeds_double_enabled').on('change', (event) => {
+        ensureSettings().doubleEnabled = !!event.target.checked;
+        saveSettingsDebounced();
+    });
 }
 
 async function injectSettingsUi() {
@@ -628,6 +949,7 @@ async function injectSettingsUi() {
     // Initialize toggle state
     const settings = ensureSettings();
     $('#image_embeds_enabled').prop('checked', !!settings.enabled);
+    $('#image_embeds_double_enabled').prop('checked', !!settings.doubleEnabled);
 }
 
 function bindEvents() {
