@@ -16,9 +16,10 @@ const SETTINGS_KEY = 'imageEmbedsExpressions';
 const STORAGE_FOLDER = 'image-embeds-expressions';
 const PLACEHOLDER_REGEX = /\{\{img::(.*?)\}\}/gi;
 const CODE_TAGS = new Set(['code', 'pre', 'samp', 'kbd']);
-const defaultSettings = { characters: {}, enabled: true, doubleEnabled: false };
+const defaultSettings = { characters: {}, enabled: true, doubleEnabled: false, showUserMode: true };
 const DEFAULT_CHARACTER_GROUP = '__default__';
 let lastAssistantMessageId = null;
+let currentMode = 'character'; // 'character' or 'user'
 
 function escapeRegExp(value) {
     return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -66,6 +67,10 @@ function ensureSettings() {
         extension_settings[SETTINGS_KEY].doubleEnabled = false;
     }
 
+    if (typeof extension_settings[SETTINGS_KEY].showUserMode !== 'boolean') {
+        extension_settings[SETTINGS_KEY].showUserMode = true;
+    }
+
     return extension_settings[SETTINGS_KEY];
 }
 
@@ -105,6 +110,28 @@ function getCharacterFolder() {
     return `${STORAGE_FOLDER}/${normalizeName(key)}`;
 }
 
+function getUserEntries() {
+    const key = getCharacterKey();
+    if (!key) return [];
+    const settings = ensureSettings();
+    if (!settings.characters[key]) {
+        settings.characters[key] = { entries: [] };
+    }
+    if (!settings.characters[key].userEntries) {
+        settings.characters[key].userEntries = [];
+    }
+    if (!Array.isArray(settings.characters[key].userEntries)) {
+        settings.characters[key].userEntries = [];
+    }
+    return settings.characters[key].userEntries;
+}
+
+function getUserFolder() {
+    const key = getCharacterKey();
+    if (!key) return STORAGE_FOLDER;
+    return `${STORAGE_FOLDER}/${normalizeName(key)}_user`;
+}
+
 function normalizeName(name) {
     return String(name ?? '')
         .trim()
@@ -114,7 +141,16 @@ function normalizeName(name) {
 
 function findEntryByName(name) {
     const target = normalizeName(name);
-    return getCharacterEntries().find(entry => normalizeName(entry.name) === target);
+    
+    // Search character entries first
+    let entry = getCharacterEntries().find(entry => normalizeName(entry.name) === target);
+    if (entry) return entry;
+    
+    // Then search user entries if available
+    if (currentMode === 'user') {
+        entry = getUserEntries().find(entry => normalizeName(entry.name) === target);
+    }
+    return entry || null;
 }
 
 function parseEntryName(name) {
@@ -131,13 +167,28 @@ function parseEntryName(name) {
     };
 }
 
-function buildNeedles(entry) {
+function buildNeedles(entry, includeFirstPerson = false) {
     const parsed = parseEntryName(entry.name);
-    return [
+    const needles = [
         normalizeName(entry.name).replace(/_/g, ' '),
         parsed.character?.replace(/_/g, ' '),
         normalizeName(parsed.expression).replace(/_/g, ' '),
     ].filter(Boolean);
+
+    // Add first person variations for user expressions
+    if (includeFirstPerson) {
+        const firstPersonVariations = [
+            `i'm ${needles[0]}`,
+            `i am ${needles[0]}`,
+            `im ${needles[0]}`,
+            `i'm ${needles[needles.length - 1]}`,
+            `i am ${needles[needles.length - 1]}`,
+            `im ${needles[needles.length - 1]}`,
+        ].filter(Boolean);
+        needles.push(...firstPersonVariations);
+    }
+
+    return needles;
 }
 
 function groupEntriesByCharacter(entries) {
@@ -484,8 +535,42 @@ function replaceTextNode(textNode) {
 
 function pickEntriesForMessage(messageId, allowMultiple = false) {
     const message = chat?.[messageId];
-    if (!message || message.is_user || message.is_system) return [];
+    if (!message || message.is_system) return [];
 
+    // Handle user messages - use same detection logic as character messages
+    if (message.is_user) {
+        const userEntries = getUserEntries();
+        if (!userEntries.length) return [];
+        
+        const messageText = String(message.mes || '').toLowerCase();
+        const cleaned = messageText.replace(/[^\w\s]/g, ' ');
+        
+        const maxCount = allowMultiple ? 2 : 1;
+        const selected = [];
+        const seenEntries = new Set();
+
+        // Try to find entries that match keywords in user message (with first person support)
+        for (const entry of userEntries) {
+            const needles = buildNeedles(entry, true); // true = include first person variations
+            if (needles.some(needle => cleaned.includes(needle))) {
+                const key = entry.id || entry.name || entry.url;
+                if (!seenEntries.has(key)) {
+                    selected.push({ entry, character: 'user' });
+                    seenEntries.add(key);
+                    if (selected.length >= maxCount) break;
+                }
+            }
+        }
+
+        // If no keyword match found, use the first entry as fallback
+        if (selected.length === 0 && userEntries.length > 0) {
+            selected.push({ entry: userEntries[0], character: 'user' });
+        }
+
+        return selected;
+    }
+
+    // Handle character/assistant messages
     const entries = getCharacterEntries();
     if (!entries.length) return [];
 
@@ -728,7 +813,7 @@ function autoInjectAfterGeneration(root, messageId) {
     if (!settings.enabled) return;
     if (!root) return;
     const message = chat?.[messageId];
-    if (message?.is_user || message?.is_system) return;
+    if (message?.is_system) return;
     const textContent = (root.textContent || '').replace(/\u200b/g, '').trim();
     if (!textContent || textContent === '...' || textContent === '…') return;
 
@@ -782,20 +867,42 @@ function renderPlaceholders(root) {
 
 function renderList() {
     const list = $('#image_embeds_list');
-    const entries = getCharacterEntries();
+    let entries;
+    let storageKey;
 
     if (!list.length) return;
 
     list.empty();
 
-    if (!getCharacterKey()) {
-        list.append($('<div class="image-embeds-empty">Open a character chat to manage Image Embeds.</div>'));
-        return;
-    }
+    // Check if character is selected
+    const charKey = getCharacterKey();
 
-    if (!entries.length) {
-        list.append($('<div class="There are no expressions for this character yet. Click + to add one.</div>'));
-        return;
+    if (currentMode === 'user') {
+        // User mode requires a character to be selected
+        if (!charKey) {
+            list.append($('<div class="image-embeds-empty">Open a character chat to manage User Expressions.</div>'));
+            return;
+        }
+        entries = getUserEntries();
+        storageKey = charKey;
+        
+        if (!entries.length) {
+            list.append($('<div class="image-embeds-empty">No user expressions added yet. Click + to add one.</div>'));
+            return;
+        }
+    } else {
+        // Character mode
+        if (!charKey) {
+            list.append($('<div class="image-embeds-empty">Open a character chat to manage Image Embeds.</div>'));
+            return;
+        }
+        entries = getCharacterEntries();
+        storageKey = charKey;
+        
+        if (!entries.length) {
+            list.append($('<div class="image-embeds-empty">There are no expressions for this character yet. Click + to add one.</div>'));
+            return;
+        }
     }
 
     for (const entry of entries) {
@@ -812,10 +919,18 @@ function renderList() {
             refreshAllMessages();
         });
 
-        remove.on('click', () => {
-            const key = getCharacterKey();
-            if (!key) return;
-            extension_settings[SETTINGS_KEY].characters[key].entries = getCharacterEntries().filter(x => x.id !== entry.id);
+        remove.on('click', async () => {
+            // Delete the physical file from server
+            await deleteExpressionFile(entry.url);
+            
+            // Remove from settings
+            if (currentMode === 'user') {
+                extension_settings[SETTINGS_KEY].characters[storageKey].userEntries = 
+                    getUserEntries().filter(x => x.id !== entry.id);
+            } else {
+                extension_settings[SETTINGS_KEY].characters[storageKey].entries = 
+                    getCharacterEntries().filter(x => x.id !== entry.id);
+            }
             saveSettingsDebounced();
             renderList();
             refreshAllMessages();
@@ -827,7 +942,7 @@ function renderList() {
 }
 
 function ensureUniqueName(baseName) {
-    const entries = getCharacterEntries();
+    const entries = currentMode === 'user' ? getUserEntries() : getCharacterEntries();
     const normBase = normalizeName(baseName) || 'expression';
     let candidate = normBase;
     let counter = 1;
@@ -840,9 +955,29 @@ function ensureUniqueName(baseName) {
     return candidate;
 }
 
+async function deleteExpressionFile(url) {
+    if (!url) return;
+
+    try {
+        const response = await fetch('/api/files/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: url }),
+        });
+
+        if (!response.ok) {
+            console.warn('Failed to delete expression file:', url, response.statusText);
+        }
+    } catch (error) {
+        console.warn('Error deleting expression file:', url, error);
+    }
+}
+
 async function addExpressionFromFile(file) {
     if (!file) return;
-    const charKey = getCharacterKey();
+    
+    let charKey = getCharacterKey();
+    
     if (!charKey) {
         toastr.warning('Open a character chat to manage Image Embeds.', 'Image Embeds');
         return;
@@ -854,12 +989,19 @@ async function addExpressionFromFile(file) {
     }
 
     try {
+        let folder;
+        if (currentMode === 'user') {
+            folder = getUserFolder();
+        } else {
+            folder = getCharacterFolder();
+        }
+
         const base64 = await getBase64Async(file);
         const base64Data = base64.split(',')[1];
         const extension = getFileExtension(file) || file.type.split('/')[1] || 'png';
         const slug = getStringHash(file.name || base64Data);
         const fileName = `${Date.now()}_${slug}`;
-        const url = await saveBase64AsFile(base64Data, getCharacterFolder(), fileName, extension);
+        const url = await saveBase64AsFile(base64Data, folder, fileName, extension);
 
         if (!url) {
             toastr.error('Failed to save image.', 'Image Embeds');
@@ -868,12 +1010,22 @@ async function addExpressionFromFile(file) {
 
         const defaultName = ensureUniqueName((file.name || 'expression').replace(/\.[^.]+$/, ''));
         const settings = ensureSettings();
-        settings.characters[charKey].entries.push({
-            id: createId(),
-            name: defaultName,
-            url,
-            originalName: file.name || '',
-        });
+        
+        if (currentMode === 'user') {
+            settings.characters[charKey].userEntries.push({
+                id: createId(),
+                name: defaultName,
+                url,
+                originalName: file.name || '',
+            });
+        } else {
+            settings.characters[charKey].entries.push({
+                id: createId(),
+                name: defaultName,
+                url,
+                originalName: file.name || '',
+            });
+        }
 
         saveSettingsDebounced();
         renderList();
@@ -937,6 +1089,45 @@ function bindUi() {
         ensureSettings().doubleEnabled = !!event.target.checked;
         saveSettingsDebounced();
     });
+
+    $('#image_embeds_user_enabled').on('change', (event) => {
+        ensureSettings().showUserMode = !!event.target.checked;
+        saveSettingsDebounced();
+        
+        // Show/hide user mode button
+        if (event.target.checked) {
+            $('#image_embeds_mode_user').css('display', 'inline-block');
+        } else {
+            $('#image_embeds_mode_user').css('display', 'none');
+            // Switch back to character mode if user disables mode switching
+            if (currentMode === 'user') {
+                currentMode = 'character';
+                $('#image_embeds_mode_char').css('font-weight', 'bold');
+                $('#image_embeds_mode_user').css('font-weight', 'normal');
+                $('#image_embeds_mode_label').text('Character Expressions');
+            }
+        }
+        renderList();
+    });
+
+    $('#image_embeds_mode_char').on('click', () => {
+        if (!getCharacterKey()) return;
+        currentMode = 'character';
+        $('#image_embeds_mode_char').css('font-weight', 'bold');
+        $('#image_embeds_mode_user').css('font-weight', 'normal');
+        $('#image_embeds_mode_label').text('Character Expressions');
+        renderList();
+    });
+
+    $('#image_embeds_mode_user').on('click', () => {
+        const settings = ensureSettings();
+        if (!getCharacterKey() || !settings.showUserMode) return;
+        currentMode = 'user';
+        $('#image_embeds_mode_char').css('font-weight', 'normal');
+        $('#image_embeds_mode_user').css('font-weight', 'bold');
+        $('#image_embeds_mode_label').text('User Expressions');
+        renderList();
+    });
 }
 
 async function injectSettingsUi() {
@@ -950,6 +1141,13 @@ async function injectSettingsUi() {
     const settings = ensureSettings();
     $('#image_embeds_enabled').prop('checked', !!settings.enabled);
     $('#image_embeds_double_enabled').prop('checked', !!settings.doubleEnabled);
+    $('#image_embeds_user_enabled').prop('checked', !!settings.showUserMode);
+
+    // Hide user mode buttons if disabled
+    if (!settings.showUserMode) {
+        $('#image_embeds_mode_user').css('display', 'none');
+        currentMode = 'character';
+    }
 }
 
 function bindEvents() {

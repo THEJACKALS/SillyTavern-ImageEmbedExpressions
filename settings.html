@@ -15,17 +15,30 @@
             <input type="checkbox" id="image_embeds_double_enabled">
             <span>Enabled Double Expressions (inject up to two matches)</span>
         </label>
-        <div class="image-embeds-toolbar flex-container alignitemscenter">
-            <label class="flex1" for="image_embeds_list">Value</label>
+        <label class="checkbox_label">
+            <input type="checkbox" id="image_embeds_user_enabled">
+            <span>Show User Expressions Mode (manage expressions tied to each character)</span>
+        </label>
+        <div class="image-embeds-toolbar flex-container alignitemscenter" style="margin-top: 15px;">
+            <label class="flex1" for="image_embeds_list">
+                <span id="image_embeds_mode_label">Character Expressions</span>
+                <div style="display: flex; gap: 5px; margin-left: 10px;">
+                    <button type="button" id="image_embeds_mode_char" class="menu_button" style="font-weight: bold;">Char</button>
+                    <button type="button" id="image_embeds_mode_user" class="menu_button">User</button>
+                </div>
+            </label>
             <button type="button" id="image_embeds_add" class="menu_button menu_button_icon" title="Add expression image">
                 <i class="fa-solid fa-plus"></i>
             </button>
         </div>
         <div id="image_embeds_list" class="image-embeds-list"></div>
         <p class="hint">
-            <span>1. Per-character using this Placeholder: </span><code>{{img::expression_name}}</code> automatically.<br>
-            <span>2. For multi-character chats, Use name expressions as like this <code>NameChar/pose</code> or <code>NameChar_pose</code> and can use any separator (also accepts <code>\</code>, <code>-</code>, <code>|</code>)</span><br>
-            <span>e.g., <code>Evelyn/smile</code>, <code>Violet-huhu</code>, <code>Miko|focused</code> so auto-detect can pick the right character.</span>
+            <span>1. Both Character and User expressions are stored per-character.</span><br>
+            <span>2. Character expressions auto-inject when the character speaks.</span><br>
+            <span>3. User expressions auto-inject when you (the user) send messages.</span><br>
+            <span>4. Expressions are injected using placeholder: </span><code>{{img::expression_name}}</code><br>
+            <span>5. For multi-character chats, you can name them like: <code>NameChar/pose</code> or <code>NameChar_pose</code> (supports <code>\</code>, <code>-</code>, <code>|</code> separators)</span><br>
+            <span>e.g., <code>Evelyn/smile</code>, <code>Violet-huhu</code>, <code>Miko|focused</code></span>
         </p>
         <input type="file" id="image_embeds_file_input" accept="image/*" multiple hidden>
     </div>
