@@ -9,11 +9,76 @@
     <div class="inline-drawer-content">
         <label class="checkbox_label">
             <input type="checkbox" id="image_embeds_enabled">
-            <span>Enabled (auto-insert after generation)</span>
+            <span>Enabled</span>
         </label>
         <label class="checkbox_label">
+            <input type="checkbox" id="image_embeds_advanced_enabled">
+            <span>Advanced Expressions (let AI read the chat and pick the best expression) (Beta)</span>
+        </label>
+        
+        <!-- Advanced Expressions AI Configuration (Hidden by default) -->
+        <div id="image_embeds_advanced_settings" style="display: none; margin-top: 10px;">
+            <details style="border-left: 3px solid #4a9eff; background-color: rgba(74, 158, 255, 0.1); padding: 10px;" open>
+                <summary style="cursor: pointer; font-weight: 600; margin-bottom: 10px;">
+                    AI Provider Configuration
+                </summary>
+                <p class="hint" style="margin-top: 0;">
+                    Works with built-in providers and any OpenAI-compatible endpoint. Turn this off to hide all provider fields.
+                </p>
+                
+                <div style="margin-bottom: 10px;">
+                    <label for="image_embeds_api_provider" style="display: block; margin-bottom: 5px;">
+                        <b>AI Provider:</b>
+                    </label>
+                    <select id="image_embeds_api_provider" class="text_pole" style="width: 100%;">
+                        <option value="">-- Select Provider --</option>
+                    </select>
+                    <small id="image_embeds_provider_info" style="display: block; margin-top: 5px; color: #888;"></small>
+                </div>
+
+                <div id="image_embeds_baseurl_container" style="display: none; margin-bottom: 10px;">
+                    <label for="image_embeds_custom_baseurl">
+                        <b>Base URL:</b>
+                    </label>
+                    <input type="text" id="image_embeds_custom_baseurl" class="text_pole" placeholder="e.g., http://localhost:11434/v1" style="width: 100%; margin-top: 5px;">
+                    <small style="display: block; margin-top: 5px; color: #888;">Use this for local servers, proxies, OpenRouter-compatible gateways, or custom chat completion APIs</small>
+                </div>
+
+                <div style="margin-bottom: 10px;" id="image_embeds_model_container" style="display: none;">
+                    <label for="image_embeds_api_model" style="display: block; margin-bottom: 5px;">
+                        <b>Model Preset:</b>
+                    </label>
+                    <select id="image_embeds_api_model" class="text_pole" style="width: 100%;">
+                        <option value="">-- Select or type model name --</option>
+                    </select>
+                    <input type="text" id="image_embeds_api_model_custom" class="text_pole" placeholder="Type any model name" style="width: 100%; margin-top: 5px; display: none;">
+                    <small style="display: block; margin-top: 5px; color: #888;">Pick a preset model, or type one when the provider has no preset list</small>
+                </div>
+
+                <div style="margin-bottom: 10px;">
+                    <label for="image_embeds_api_key">
+                        <b>API Key:</b>
+                    </label>
+                    <input type="password" id="image_embeds_api_key" class="text_pole" placeholder="Enter your API key" style="width: 100%; margin-top: 5px;">
+                    <small id="image_embeds_api_key_hint" style="display: block; margin-top: 5px; color: #888;">Your API key is stored locally and only sent to the provider</small>
+                </div>
+
+                <div style="display: flex; gap: 5px;">
+                    <button type="button" id="image_embeds_test_connection" class="menu_button" title="Restart API provider connection">
+                        <i class="fa-solid fa-rotate"></i> Restart Connection
+                    </button>
+                    <div id="image_embeds_connection_status" style="flex: 1; display: flex; align-items: center; margin-left: 10px;"></div>
+                </div>
+                <label class="checkbox_label" style="margin-top: 10px;">
+                    <input type="checkbox" id="image_embeds_auto_connect_last_server">
+                    <span>Auto-connect to Last Server</span>
+                </label>
+            </details>
+        </div>
+        
+        <label class="checkbox_label">
             <input type="checkbox" id="image_embeds_double_enabled">
-            <span>Enabled Double Expressions (inject up to two matches)</span>
+            <span>Enabled Double Expressions (If you have double character on Character Cards)</span>
         </label>
         <label class="checkbox_label">
             <input type="checkbox" id="image_embeds_user_enabled">
@@ -33,12 +98,11 @@
         </div>
         <div id="image_embeds_list" class="image-embeds-list"></div>
         <p class="hint">
-            <span>1. Both Character and User expressions are stored per-character.</span><br>
+            <span>1. Both Character and User expressions are stored per-character card.</span><br>
             <span>2. Character expressions auto-inject when the character speaks.</span><br>
             <span>3. User expressions auto-inject when you (the user) send messages.</span><br>
-            <span>4. Expressions are injected using placeholder: </span><code>{{img::expression_name}}</code><br>
-            <span>5. For multi-character chats, you can name them like: <code>NameChar/pose</code> or <code>NameChar_pose</code> (supports <code>\</code>, <code>-</code>, <code>|</code> separators)</span><br>
-            <span>e.g., <code>Evelyn/smile</code>, <code>Violet-huhu</code>, <code>Miko|focused</code></span>
+            <span>4. Expressions are injected using placeholder: <code>{{img::expression_name}}</code>, and support separators eg; <code>/</code> <code>\</code> <code>|</code> <code>-</code> <code>_</code>, Example: <code>Jean-Luc/smile</code>, <code>Dima_Neutral</code>, <code>Evelyn/smile</code>, <code>Violet-huhu</code>, <code>Miko|focused</code></span><br>
+            <span>5. You can use double expressions as you checklist Enabled Double Expressions</span>
         </p>
         <input type="file" id="image_embeds_file_input" accept="image/*" multiple hidden>
     </div>
