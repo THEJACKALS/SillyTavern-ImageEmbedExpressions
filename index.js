@@ -1,4 +1,4 @@
-import { characters, chat, eventSource, event_types, saveSettingsDebounced, this_chid } from '/script.js';
+import { characters, chat, eventSource, event_types, saveSettings, saveSettingsDebounced, this_chid } from '/script.js';
 import { extension_settings, renderExtensionTemplateAsync } from '/scripts/extensions.js';
 import { getBase64Async, getFileExtension, getStringHash, saveBase64AsFile } from '/scripts/utils.js';
 import {
@@ -42,7 +42,7 @@ let currentMode = 'character'; // 'character' or 'user'
 let messagePlacementCache = new Map();
 
 // ---------- Persistent AI Expression Cache (localStorage-backed) ----------
-const EXPRESSION_DETECTION_VERSION = 7;
+const EXPRESSION_DETECTION_VERSION = 8;
 const AI_CACHE_STORAGE_KEY = `imageEmbedsExpressions_aiCache_v${EXPRESSION_DETECTION_VERSION}`;
 const AI_CACHE_MAX_ENTRIES = 500; // prevent unbounded growth
 const ADVANCED_AI_RECENT_MESSAGE_WINDOW = 2;
@@ -539,12 +539,7 @@ function resolveMessageCharacterKey(messageId, characterKeys = []) {
         return speakerKey;
     }
 
-    const recentContext = buildRecentInteractionContext(messageId, characterKeys);
-    if (recentContext.primary) {
-        return recentContext.primary;
-    }
-
-    return topCurrent?.character || '';
+    return '';
 }
 
 function buildRecentInteractionContext(messageId, characterKeys, windowSize = 4) {
@@ -1037,10 +1032,10 @@ function findEntryMatchInText(entries, messageText, preferredCharacter = '') {
     const cleaned = String(messageText || '').toLowerCase().replace(/[^\w\s]/g, ' ');
     const normalizedPreferredCharacter = normalizeName(preferredCharacter);
     const prioritizedEntries = normalizedPreferredCharacter
-        ? [
-            ...entries.filter(entry => parseEntryName(entry.name).character === normalizedPreferredCharacter),
-            ...entries.filter(entry => parseEntryName(entry.name).character !== normalizedPreferredCharacter),
-        ]
+        ? entries.filter(entry => {
+            const parsed = parseEntryName(entry.name);
+            return !parsed.character || parsed.character === normalizedPreferredCharacter;
+        })
         : entries;
 
     for (const entry of prioritizedEntries) {
@@ -1510,7 +1505,6 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
     const characterKeys = Array.from(grouped.keys()).filter(key => key && key !== DEFAULT_CHARACTER_GROUP);
     const messageCharacterKey = resolveMessageCharacterKey(messageId, characterKeys);
     const activeCharacterKey = getActiveCharacterExpressionKey();
-    const recentContext = buildRecentInteractionContext(messageId, characterKeys);
     const characterScores = characterKeys.length ? scoreCharacters(messageText, characterKeys) : [];
     const dominance = analyzeParagraphDominance(messageTextRaw, characterKeys);
     const selected = [];
@@ -1539,10 +1533,6 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
         desiredCharacters.push(dominance.primary);
     } else if (characterScores[0]) {
         desiredCharacters.push(characterScores[0].character);
-    }
-
-    if (!desiredCharacters.length && recentContext.primary && grouped.has(recentContext.primary)) {
-        desiredCharacters.push(recentContext.primary);
     }
 
     if (!desiredCharacters.length && activeCharacterKey && grouped.has(activeCharacterKey)) {
@@ -1604,6 +1594,12 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
     const fallbackCharacter = (activeCharacterKey && grouped.has(activeCharacterKey))
         ? activeCharacterKey
         : (characterKeys[0] || DEFAULT_CHARACTER_GROUP);
+    const fallbackIsExplicitCharacter = fallbackCharacter && fallbackCharacter !== DEFAULT_CHARACTER_GROUP;
+    const fallbackMatchesActiveCharacter = fallbackIsExplicitCharacter && fallbackCharacter === activeCharacterKey;
+    if (fallbackIsExplicitCharacter && !fallbackMatchesActiveCharacter) {
+        return selected;
+    }
+
     const fallbackEntry = selectEntryForCharacter(grouped, fallbackCharacter, messageText);
     const fallbackKey = fallbackEntry ? (fallbackEntry.id || fallbackEntry.url || fallbackEntry.name) : null;
     if (fallbackEntry && !seenEntries.has(fallbackKey)) {
@@ -1621,7 +1617,7 @@ async function pickEntriesForMessage(messageId, allowMultiple = false) {
     const contextCharacterKeys = Array.from(groupedEntries.keys()).filter(key => key && key !== DEFAULT_CHARACTER_GROUP);
     const messageCharacterKey = resolveMessageCharacterKey(messageId, contextCharacterKeys);
     const recentContext = buildRecentInteractionContext(messageId, contextCharacterKeys);
-    const aiCharacterName = messageCharacterKey || recentContext.primary || getActiveCharacterExpressionKey() || characters?.[this_chid]?.name || 'Character';
+    const aiCharacterName = messageCharacterKey || getActiveCharacterExpressionKey() || characters?.[this_chid]?.name || 'Character';
     const cacheKey = getStringHash(JSON.stringify({
         messageId,
         messageText: String(message?.mes || ''),
@@ -1668,19 +1664,27 @@ async function pickEntriesForMessage(messageId, allowMultiple = false) {
     // We compare normalized character names to handle all separator formats:
     //   Evelyn/smile, NameChar_pose, Violet-huhu, Miko|focused, etc.
     const normalizedAiChar = normalizeName(aiCharacterName);
+    let hasExplicitCharacterEntries = false;
     const filteredEntries = allEntries.filter(e => {
         const parsed = parseEntryName(e.name);
         if (!parsed.character) {
             // No character prefix → ungrouped entry, include it
             return true;
         }
+        hasExplicitCharacterEntries = true;
         // Match normalized character names; also try stripping separators from
         // the parsed character in case normalizeName left a `-` or `|` in place.
         const parsedCharClean = parsed.character.replace(/[-|_\s]+/g, '');
         const aiCharClean = normalizedAiChar.replace(/[-|_\s]+/g, '');
         return parsed.character === normalizedAiChar || parsedCharClean === aiCharClean;
     });
-    // Fall back to all entries if filter removes everything (e.g., no prefix-named entries)
+
+    if (filteredEntries.length === 0 && hasExplicitCharacterEntries) {
+        messagePlacementCache.set(cacheKey, legacySelections);
+        return legacySelections;
+    }
+
+    // Fall back to all entries only when every entry is ungrouped/generic.
     const entries = filteredEntries.length > 0 ? filteredEntries : allEntries;
 
     const messageTextRaw = String(message.mes || '');
@@ -2297,7 +2301,7 @@ function bindUi() {
         saveSettingsDebounced();
     });
 
-    $('#image_embeds_double_enabled').on('change', (event) => {
+    $('#image_embeds_double_enabled').on('change', async (event) => {
         const settings = ensureSettings();
         const previousValue = !!settings.doubleEnabled;
         const nextValue = !!event.target.checked;
@@ -2310,8 +2314,8 @@ function bindUi() {
 
         settings.doubleEnabled = nextValue;
         clearAiExpressionCache();
-        saveSettingsDebounced();
-        setTimeout(() => window.location.reload(), 750);
+        await saveSettings();
+        window.location.reload();
     });
 
     $('#image_embeds_advanced_enabled').on('change', (event) => {
