@@ -15,7 +15,7 @@
             <input type="checkbox" id="image_embeds_advanced_enabled">
             <span>Advanced Expressions (let AI read the chat and pick the best expression) (Beta)</span>
         </label>
-        
+
         <!-- Advanced Expressions AI Configuration (Hidden by default) -->
         <div id="image_embeds_advanced_settings" style="display: none; margin-top: 10px;">
             <details style="border-left: 3px solid #4a9eff; background-color: rgba(74, 158, 255, 0.1); padding: 10px;" open>
@@ -25,7 +25,7 @@
                 <p class="hint" style="margin-top: 0;">
                     Works with built-in providers and any OpenAI-compatible endpoint. Turn this off to hide all provider fields.
                 </p>
-                
+
                 <div style="margin-bottom: 10px;">
                     <label for="image_embeds_api_provider" style="display: block; margin-bottom: 5px;">
                         <b>AI Provider:</b>
@@ -75,7 +75,7 @@
                 </label>
             </details>
         </div>
-        
+
         <label class="checkbox_label">
             <input type="checkbox" id="image_embeds_double_enabled">
             <span>Enabled Double Expressions (If you have double character on Character Cards)</span>
@@ -84,6 +84,14 @@
             <input type="checkbox" id="image_embeds_user_enabled">
             <span>Show User Expressions Mode (manage expressions tied to each character)</span>
         </label>
+        <div style="margin-top: 8px; display: flex; gap: 5px; flex-wrap: wrap;">
+            <button type="button" id="image_embeds_regenerate_current" class="menu_button" title="Clear and regenerate expressions for the currently opened character card only">
+                <i class="fa-solid fa-rotate"></i> Regenerate Expressions
+            </button>
+            <button type="button" id="image_embeds_expression_docs" class="menu_button" title="Show supported expression categories">
+                <i class="fa-solid fa-book"></i> Documentation
+            </button>
+        </div>
         <div class="image-embeds-toolbar flex-container alignitemscenter" style="margin-top: 15px;">
             <label class="flex1" for="image_embeds_list">
                 <span id="image_embeds_mode_label">Character Expressions</span>
@@ -104,6 +112,20 @@
             <span>4. Expressions are injected using placeholder: <code>{{img::expression_name}}</code>, and support separators eg; <code>/</code> <code>\</code> <code>|</code> <code>-</code> <code>_</code>, Example: <code>Jean-Luc/smile</code>, <code>Dima_Neutral</code>, <code>Evelyn/smile</code>, <code>Violet-huhu</code>, <code>Miko|focused</code></span><br>
             <span>5. You can use double expressions as you checklist Enabled Double Expressions</span>
         </p>
+        <div id="image_embeds_expression_docs_popup" class="image-embeds-docs-popup" aria-hidden="true" style="display: none;">
+            <div class="image-embeds-docs-panel" role="dialog" aria-modal="true" aria-labelledby="image_embeds_expression_docs_title">
+                <div class="image-embeds-docs-header">
+                    <div>
+                        <div id="image_embeds_expression_docs_title" class="image-embeds-docs-title">Expression Support</div>
+                        <div class="image-embeds-docs-subtitle">Supported expression categories from hint-bank.js</div>
+                    </div>
+                    <button type="button" id="image_embeds_expression_docs_close" class="menu_button menu_button_icon" title="Close documentation">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <div id="image_embeds_expression_docs_list" class="image-embeds-docs-list"></div>
+            </div>
+        </div>
         <input type="file" id="image_embeds_file_input" accept="image/*" multiple hidden>
     </div>
 </div>

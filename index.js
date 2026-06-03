@@ -1,14 +1,23 @@
-import { characters, chat, eventSource, event_types, saveSettings, saveSettingsDebounced, this_chid } from '/script.js';
+import { characters, chat, eventSource, event_types, saveSettingsDebounced, this_chid } from '/script.js';
 import { extension_settings, renderExtensionTemplateAsync } from '/scripts/extensions.js';
 import { getBase64Async, getFileExtension, getStringHash, saveBase64AsFile } from '/scripts/utils.js';
 import {
-    callAIProvider,
     fetchProviderModels,
     getAllProviders,
     getProviderConfig,
     providerRequiresApiKey,
     testAPIConnection,
 } from './api-providers.js';
+import { detectActiveCharacterKeys } from './character-presence.js';
+import {
+    clearExpressionAiCache,
+    detectExpressionWithAI,
+    EXPRESSION_DETECTION_VERSION,
+} from './LLM-Helper-Expressions.js';
+import {
+    EXPRESSION_HINTS,
+    getExpressionHintKeys,
+} from './hint-bank.js';
 
 const EXTENSION_ID = (() => {
     const match = new URL(import.meta.url).pathname.match(/scripts\/extensions\/(.+)\/index\.js$/);
@@ -24,11 +33,11 @@ const SETTINGS_KEY = 'imageEmbedsExpressions';
 const STORAGE_FOLDER = 'image-embeds-expressions';
 const PLACEHOLDER_REGEX = /\{\{img::(.*?)\}\}/gi;
 const CODE_TAGS = new Set(['code', 'pre', 'samp', 'kbd']);
-const defaultSettings = { 
-    characters: {}, 
-    enabled: true, 
-    doubleEnabled: false, 
-    showUserMode: true, 
+const defaultSettings = {
+    characters: {},
+    enabled: true,
+    doubleEnabled: false,
+    showUserMode: true,
     advancedExpressionsEnabled: false,
     apiProvider: '',
     apiKey: '',
@@ -40,42 +49,20 @@ const DEFAULT_CHARACTER_GROUP = '__default__';
 let lastAssistantMessageId = null;
 let currentMode = 'character'; // 'character' or 'user'
 let messagePlacementCache = new Map();
+const llmEligibleMessageIds = new Set();
 
-// ---------- Persistent AI Expression Cache (localStorage-backed) ----------
-const EXPRESSION_DETECTION_VERSION = 8;
-const AI_CACHE_STORAGE_KEY = `imageEmbedsExpressions_aiCache_v${EXPRESSION_DETECTION_VERSION}`;
-const AI_CACHE_MAX_ENTRIES = 500; // prevent unbounded growth
 const ADVANCED_AI_RECENT_MESSAGE_WINDOW = 2;
+const LEADING_CHARACTER_ACTIONS = [
+    'said', 'says', 'asked', 'asks', 'replied', 'replies', 'responded', 'responds',
+    'whispered', 'whispers', 'muttered', 'mutters', 'shouted', 'shouts', 'yelled', 'yells',
+    'laughed', 'laughs', 'chuckled', 'chuckles', 'smiled', 'smiles', 'grinned', 'grins',
+    'sighed', 'sighs', 'squeaked', 'squeaks', 'snapped', 'snaps', 'growled', 'growls', 'hissed', 'hisses',
+    'looked', 'looks', 'glared', 'glares', 'blinked', 'blinks', 'nodded', 'nods',
+    'shook', 'turns', 'turned', 'tapped', 'waves', 'waved', 'gestured', 'gestures',
+    'paused', 'pauses', 'leaned', 'leans', 'stepped', 'steps', 'walked', 'walks',
+    'sat', 'sits', 'stood', 'stands', 'crossed', 'uncrossed', 'clenched', 'relaxed',
+];
 
-/** Load the persisted cache from localStorage into a Map. */
-function loadAiExpressionCache() {
-    try {
-        const raw = localStorage.getItem(AI_CACHE_STORAGE_KEY);
-        if (!raw) return new Map();
-        const obj = JSON.parse(raw);
-        if (typeof obj !== 'object' || obj === null) return new Map();
-        return new Map(Object.entries(obj));
-    } catch {
-        return new Map();
-    }
-}
-
-/** Flush the in-memory cache map to localStorage. */
-function saveAiExpressionCache(cacheMap) {
-    try {
-        // Trim to max entries (drop oldest keys = first inserted in Map iteration order)
-        let entries = [...cacheMap.entries()];
-        if (entries.length > AI_CACHE_MAX_ENTRIES) {
-            entries = entries.slice(entries.length - AI_CACHE_MAX_ENTRIES);
-        }
-        localStorage.setItem(AI_CACHE_STORAGE_KEY, JSON.stringify(Object.fromEntries(entries)));
-    } catch {
-        // localStorage might be full — silently ignore
-    }
-}
-
-let aiExpressionCache = loadAiExpressionCache();
-// -------------------------------------------------------------------------
 let modelFetchToken = 0;
 let modelRefreshTimeout = null;
 let refreshAllDebounceTimer = null;         // debounce timer for refreshAllMessages
@@ -84,10 +71,8 @@ const processedMessages = new WeakMap();    // track already-processed message r
 let processedMessageGeneration = 0;         // bump to invalidate all processedMessages entries
 
 function clearAiExpressionCache() {
-    aiExpressionCache.clear();
+    clearExpressionAiCache();
     messagePlacementCache.clear();
-    // Wipe the persisted cache so stale results don't survive a reload.
-    try { localStorage.removeItem(AI_CACHE_STORAGE_KEY); } catch { /* ignore */ }
     // Bump generation so all cached "already processed" roots get re-evaluated.
     processedMessageGeneration++;
 }
@@ -202,6 +187,61 @@ function renderConnectionStatus(state = 'disconnected', message = '') {
         );
 }
 
+function formatExpressionKey(key) {
+    return String(key || '')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function renderExpressionDocumentation() {
+    const list = $('#image_embeds_expression_docs_list');
+    if (!list.length) return;
+
+    list.empty();
+
+    const entries = Object.entries(EXPRESSION_HINTS)
+        .sort(([left], [right]) => left.localeCompare(right));
+
+    for (const [key, hints] of entries) {
+        const card = $('<div class="image-embeds-doc-card"></div>');
+        const header = $('<div class="image-embeds-doc-card-header"></div>');
+        header.append(
+            $('<div class="image-embeds-doc-card-title"></div>').text(formatExpressionKey(key)),
+            $('<div class="image-embeds-doc-card-count"></div>').text(`${hints.length} support terms`),
+        );
+
+        const hintWrap = $('<div class="image-embeds-doc-hints"></div>');
+        const previewHints = hints.slice(0, 6);
+
+        for (const hint of previewHints) {
+            hintWrap.append($('<span class="image-embeds-doc-hint"></span>').text(hint));
+        }
+
+        if (hints.length > previewHints.length) {
+            hintWrap.append($('<span class="image-embeds-doc-hint image-embeds-doc-hint-more"></span>').text(`+${hints.length - previewHints.length} more`));
+        }
+
+        card.append(header, hintWrap);
+        list.append(card);
+    }
+}
+
+function openExpressionDocumentation() {
+    renderExpressionDocumentation();
+    $('#image_embeds_expression_docs_popup')
+        .appendTo('body')
+        .addClass('is-open')
+        .attr('aria-hidden', 'false')
+        .css('display', 'flex');
+}
+
+function closeExpressionDocumentation() {
+    $('#image_embeds_expression_docs_popup')
+        .removeClass('is-open')
+        .attr('aria-hidden', 'true')
+        .hide();
+}
+
 async function restartProviderConnection({ signal } = {}) {
     const settings = ensureSettings();
     const providerConfig = getProviderConfig(settings.apiProvider);
@@ -265,6 +305,24 @@ function escapeRegExp(value) {
     return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function textIncludesNeedle(text, needle) {
+    const value = String(needle || '').trim();
+    if (!value) return false;
+    if (/\s/.test(value)) {
+        return String(text || '').includes(value);
+    }
+    return new RegExp(`\\b${escapeRegExp(value)}\\b`, 'i').test(String(text || ''));
+}
+
+function normalizeHintText(text) {
+    return String(text || '')
+        .toLowerCase()
+        .replace(/[^\w\s-]/g, ' ')
+        .replace(/[-_]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function rememberAssistantMessage(messageId) {
     const numericId = Number(messageId);
     if (Number.isNaN(numericId)) return null;
@@ -288,6 +346,26 @@ function getActiveAssistantMessageId() {
     }
 
     return null;
+}
+
+function markMessageEligibleForLLM(messageId) {
+    const numericId = Number(messageId);
+    if (Number.isNaN(numericId)) return;
+    const message = chat?.[numericId];
+    if (!message || message.is_user || message.is_system) return;
+    llmEligibleMessageIds.add(numericId);
+}
+
+function canUseLLMForMessage(messageId) {
+    const numericId = Number(messageId);
+    return !Number.isNaN(numericId) && llmEligibleMessageIds.has(numericId);
+}
+
+function consumeLLMEligibility(messageId) {
+    const numericId = Number(messageId);
+    if (!Number.isNaN(numericId)) {
+        llmEligibleMessageIds.delete(numericId);
+    }
 }
 
 function ensureSettings() {
@@ -409,11 +487,11 @@ function normalizeName(name) {
 
 function findEntryByName(name) {
     const target = normalizeName(name);
-    
+
     // Search character entries first
     let entry = getCharacterEntries().find(entry => normalizeName(entry.name) === target);
     if (entry) return entry;
-    
+
     // Then search user entries if available
     if (currentMode === 'user') {
         entry = getUserEntries().find(entry => normalizeName(entry.name) === target);
@@ -517,10 +595,114 @@ function detectCharacterFromText(text, characters) {
     return scored[0]?.character || null;
 }
 
+function getLeadingNarrativeCharacterKey(text) {
+    const value = String(text || '')
+        .replace(/^[\s>*_"'`~()[\]{}]+/, '')
+        .trim();
+    if (!value) return '';
+
+    const possessiveMatch = value.match(/^([A-Z][A-Za-z0-9' -]{0,48}?)(?:'s|’s)\b/);
+    if (possessiveMatch?.[1]) {
+        return normalizeName(possessiveMatch[1]);
+    }
+
+    const labelMatch = value.match(/^([A-Z][A-Za-z0-9' -]{0,48}?)(?=\s*(?::|[–—]|\s-\s))/);
+    if (labelMatch?.[1]) {
+        return normalizeName(labelMatch[1]);
+    }
+
+    const actionPattern = LEADING_CHARACTER_ACTIONS.map(escapeRegExp).join('|');
+    const actionMatch = value.match(new RegExp(`^([A-Z][A-Za-z0-9' -]{0,48}?)\\s+(${actionPattern})\\b`));
+    if (!actionMatch?.[1]) return '';
+
+    const candidate = actionMatch[1]
+        .trim()
+        .replace(/\s+(?:and|with|to|at|from)$/i, '')
+        .trim();
+    const normalizedCandidate = normalizeName(candidate);
+    const pronouns = new Set(['i', 'you', 'he', 'she', 'they', 'we', 'it']);
+
+    return candidate && !pronouns.has(normalizedCandidate) ? normalizedCandidate : '';
+}
+
+function hasStrictCharacterScopedEntries(entries) {
+    const parsedEntries = (entries || []).map(entry => parseEntryName(entry.name));
+    return parsedEntries.length > 0 && parsedEntries.every(parsed => !!parsed.character);
+}
+
+function isUnknownLeadingCharacter(messageText, characterKeys = []) {
+    const leadingCharacter = getLeadingNarrativeCharacterKey(messageText);
+    if (!leadingCharacter) return false;
+    if (/^(?:the|a|an|when|while|as|after|before|for)_/.test(leadingCharacter)) return false;
+    return !(characterKeys || []).some(key => characterKeysMatch(key, leadingCharacter));
+}
+
 function getMessageSpeakerKey(message, characterKeys = []) {
     const speaker = normalizeName(message?.name || '');
     if (!speaker) return '';
     return characterKeys.includes(speaker) ? speaker : '';
+}
+
+function getCompactCharacterKey(characterName) {
+    return normalizeName(characterName).replace(/[-|_\s]+/g, '');
+}
+
+function characterKeysMatch(a, b) {
+    const normalizedA = normalizeName(a);
+    const normalizedB = normalizeName(b);
+    if (!normalizedA || !normalizedB) return false;
+    return normalizedA === normalizedB || getCompactCharacterKey(normalizedA) === getCompactCharacterKey(normalizedB);
+}
+
+function getCharacterSearchAliases(characterName) {
+    const normalized = normalizeName(characterName).replace(/(?:^|[_-])(chan|san|sama|kun|senpai|sensei)$/i, '');
+    const plainName = normalized.replace(/_/g, ' ').trim();
+    const parts = plainName.split(/\s+/).filter(Boolean);
+    return [...new Set([
+        plainName,
+        parts.at(-1) || '',
+    ].filter(Boolean))];
+}
+
+function entryBelongsToCharacter(entry, characterKey) {
+    const parsed = parseEntryName(entry?.name);
+    return !!parsed.character && characterKeysMatch(parsed.character, characterKey);
+}
+
+function filterEntriesForCharacter(entries, characterKey, { includeDefault = true } = {}) {
+    const normalizedCharacter = normalizeName(characterKey);
+    if (!normalizedCharacter) {
+        return entries || [];
+    }
+
+    return (entries || []).filter(entry => {
+        const parsed = parseEntryName(entry.name);
+        if (!parsed.character) {
+            return includeDefault;
+        }
+        return characterKeysMatch(parsed.character, normalizedCharacter);
+    });
+}
+
+function getCrossPackEntriesForMessage(messageText) {
+    const settings = ensureSettings();
+    const allEntries = Object.values(settings.characters || {})
+        .flatMap(character => Array.isArray(character?.entries) ? character.entries : [])
+        .filter(entry => entry?.name);
+    const groups = groupEntriesByCharacter(allEntries);
+    const characterKeys = Array.from(groups.keys()).filter(key => key && key !== DEFAULT_CHARACTER_GROUP);
+    const activeKeys = detectActiveCharacterKeys(String(messageText || ''), characterKeys);
+    const scoredKeys = scoreCharacters(String(messageText || ''), characterKeys)
+        .filter(result => result.score > 0)
+        .map(result => result.character);
+    const wantedKeys = [...new Set([...activeKeys, ...scoredKeys])];
+
+    if (!wantedKeys.length) return [];
+
+    return allEntries.filter(entry => {
+        const parsed = parseEntryName(entry.name);
+        return parsed.character && wantedKeys.some(key => characterKeysMatch(parsed.character, key));
+    });
 }
 
 function resolveMessageCharacterKey(messageId, characterKeys = []) {
@@ -531,15 +713,20 @@ function resolveMessageCharacterKey(messageId, characterKeys = []) {
     const secondCurrent = currentScores[1];
     const speakerKey = getMessageSpeakerKey(message, characterKeys);
 
-    if (topCurrent?.score >= 1 && (!secondCurrent || topCurrent.score > secondCurrent.score)) {
-        return topCurrent.character;
-    }
-
     if (speakerKey) {
         return speakerKey;
     }
 
-    return '';
+    if (topCurrent?.score >= 1 && (!secondCurrent || topCurrent.score > secondCurrent.score)) {
+        return topCurrent.character;
+    }
+
+    const recentContext = buildRecentInteractionContext(messageId, characterKeys);
+    if (recentContext.primary) {
+        return recentContext.primary;
+    }
+
+    return topCurrent?.character || '';
 }
 
 function buildRecentInteractionContext(messageId, characterKeys, windowSize = 4) {
@@ -581,41 +768,45 @@ function buildRecentInteractionContext(messageId, characterKeys, windowSize = 4)
 function scoreCharacters(text, characters) {
     const lowerText = String(text || '').toLowerCase();
     const cleaned = lowerText.replace(/[^\w\s]/g, ' ');
-    const presenceVerbs = ['said', 'says', 'ask', 'asked', 'asks', 'reply', 'replied', 'replies', 'respond', 'responded', 'responds', 'yell', 'yelled', 'yells', 'shout', 'shouted', 'shouts', 'whisper', 'whispered', 'whispers', 'mutter', 'muttered', 'mutters', 'laughed', 'laughs', 'laughing', 'smiled', 'smiles', 'smiling', 'nodded', 'nods', 'grinned', 'grins', 'grinning', 'looked', 'looks', 'looking', 'turned', 'turns', 'walking', 'walked', 'walks', 'stood', 'stands', 'standing', 'sat', 'sits', 'sitting'];
+    const presenceVerbs = ['said', 'says', 'ask', 'asked', 'asks', 'reply', 'replied', 'replies', 'respond', 'responded', 'responds', 'yell', 'yelled', 'yells', 'shout', 'shouted', 'shouts', 'whisper', 'whispered', 'whispers', 'mutter', 'muttered', 'mutters', 'laughed', 'laughs', 'laughing', 'smiled', 'smiles', 'smiling', 'nodded', 'nods', 'grinned', 'grins', 'grinning', 'looked', 'looks', 'looking', 'turned', 'turns', 'walk', 'walking', 'walked', 'walks', 'stood', 'stands', 'standing', 'sat', 'sits', 'sitting', 'hitched', 'shivered', 'giggled', 'smirked', 'melted', 'rested', 'traced', 'dried', 'watched', 'climbed', 'ground', 'grabbed', 'come', 'comes', 'came', 'arrive', 'arrives', 'arrived', 'blushed', 'cried', 'stared'];
     const imaginationHints = ['memory of', 'remembering', 'image of', 'imagination of', 'imagining', 'fantasy of', 'thinking of', 'thought of', 'dream of', 'dreaming of', 'idea of', 'vision of'];
     const results = [];
 
     for (const character of characters) {
-        const plainName = character.replace(/_/g, ' ').trim();
-        if (!plainName) continue;
+        const aliases = getCharacterSearchAliases(character);
+        if (!aliases.length) continue;
 
-        const wordPattern = new RegExp(`\\b${escapeRegExp(plainName)}\\b`, 'g');
-        const speakingPattern = new RegExp(`(^|\\n)\\s*${escapeRegExp(plainName)}\\s*[:\\-\\u2013\\u2014]`, 'g');
         let score = 0;
         let firstIndex = Infinity;
         let mentionCount = 0;
         let match;
 
-        while ((match = wordPattern.exec(cleaned)) !== null) {
-            score += 1;
-            mentionCount += 1;
-            if (match.index < firstIndex) {
-                firstIndex = match.index;
+        for (const plainName of aliases) {
+            const wordPattern = new RegExp(`\\b${escapeRegExp(plainName)}\\b`, 'g');
+            const speakingPattern = new RegExp(`(^|\\n)\\s*${escapeRegExp(plainName)}\\s*[:\\-\\u2013\\u2014]`, 'g');
+
+            while ((match = wordPattern.exec(cleaned)) !== null) {
+                const aliasWeight = plainName === aliases[0] ? 1 : 0.75;
+                score += aliasWeight;
+                mentionCount += 1;
+                if (match.index < firstIndex) {
+                    firstIndex = match.index;
+                }
+
+                const window = lowerText.slice(Math.max(0, match.index - 24), match.index + plainName.length + 24);
+                if (presenceVerbs.some(v => new RegExp(`\\b${escapeRegExp(v)}\\b`).test(window))) {
+                    score += aliasWeight;
+                }
+                if (imaginationHints.some(h => window.includes(h))) {
+                    score -= aliasWeight;
+                }
             }
 
-            const window = lowerText.slice(Math.max(0, match.index - 24), match.index + plainName.length + 24);
-            if (presenceVerbs.some(v => new RegExp(`\\b${escapeRegExp(v)}\\b`).test(window))) {
-                score += 1;
-            }
-            if (imaginationHints.some(h => window.includes(h))) {
-                score -= 1;
-            }
-        }
-
-        while ((match = speakingPattern.exec(lowerText)) !== null) {
-            score += 2;
-            if (match.index < firstIndex) {
-                firstIndex = match.index;
+            while ((match = speakingPattern.exec(lowerText)) !== null) {
+                score += plainName === aliases[0] ? 2 : 1.5;
+                if (match.index < firstIndex) {
+                    firstIndex = match.index;
+                }
             }
         }
 
@@ -637,344 +828,9 @@ function scoreCharacters(text, characters) {
     });
 }
 
-const EXPRESSION_HINTS = {
-    admiration: [
-        'admire', 'admired', 'admiration', 'impressed', 'impressive', 'amazed by you',
-        'looked up to', 'respect', 'respected', 'in awe', 'awe', 'wonder in her eyes',
-        'wonder in his eyes', 'starry eyed', 'starry-eyed',
-    ],
-    amusement: [
-        'amused', 'amusement', 'chuckled', 'chuckling', 'laughed softly', 'laughing softly',
-        'snickered', 'snickering', 'giggle', 'giggled', 'giggling', 'playful smile',
-        'teasing smile', 'smirked', 'smirking', 'grinned',
-    ],
-    anger: [
-        'angry', 'anger', 'furious', 'rage', 'glared', 'glaring', 'snapped', 'snarled',
-        'growled', 'hissed', 'clenched fist', 'clenched fists', 'clenched jaw',
-        'jaw tightened', 'scowled', 'scowl', 'seething',
-    ],
-    annoyance: [
-        'annoyed', 'annoyance', 'irritated', 'irritation', 'exasperated', 'rolled her eyes',
-        'rolled his eyes', 'sighed sharply', 'tch', 'clicked her tongue', 'clicked his tongue',
-        'flat look', 'deadpan stare', 'brow twitched',
-    ],
-    approval: [
-        'approved', 'approval', 'approving', 'nodded approvingly', 'nodded', 'good job',
-        'well done', 'proud smile', 'satisfied smile', 'gave a thumbs up', 'thumbs up',
-        'pleased', 'pleased smile',
-    ],
-    caring: [
-        'caring', 'concerned', 'concern', 'worried for you', 'are you okay', 'gentle concern',
-        'softened her voice', 'softened his voice', 'comforting', 'comforted', 'soothing',
-        'tended to', 'checked on you', 'protective',
-    ],
-    confusion: [
-        'confused', 'confusion', 'puzzled', 'bewildered', 'tilted her head', 'tilted his head',
-        'furrowed her brow', 'furrowed his brow', 'blinked in confusion', 'what do you mean',
-        'did not understand', 'does not understand', 'lost',
-    ],
-    curiosity: [
-        'curious', 'curiosity', 'intrigued', 'interested', 'leaned in', 'leans in',
-        'raised an eyebrow', 'arched an eyebrow', 'tell me more', 'questioning look',
-        'inquisitive', 'studied you',
-    ],
-    desire: [
-        'desire', 'desired', 'want', 'wanted', 'longing', 'yearning', 'hungry gaze',
-        'looked at your lips', 'half lidded eyes', 'half-lidded eyes', 'leaned closer',
-        'breath hitched', 'bit her lip', 'bit his lip', 'licked her lips', 'licked his lips', 'moan'
-    ],
-    arousal: [
-        'arousal', 'aroused', 'heated gaze', 'heat pooled', 'breath hitched',
-        'breathing grew heavier', 'heavy breathing', 'pulse quickened', 'skin flushed',
-        'body reacted', 'shivered with need', 'desire stirred', 'cum', 'orgasm', 'climax',
-    ],
-    disappointment: [
-        'disappointed', 'disappointment', 'let down', 'deflated', 'shoulders slumped',
-        'sank', 'sighed sadly', 'lowered her gaze', 'lowered his gaze', 'not what i hoped',
-        'expected better',
-    ],
-    disapproval: [
-        'disapproved', 'disapproval', 'disapproving', 'stern look', 'frowned', 'frowning',
-        'shook her head', 'shook his head', 'not okay', 'unacceptable', 'tsk', 'reproachful',
-        'judging stare',
-    ],
-    disgust: [
-        'disgust', 'disgusted', 'gross', 'revolted', 'repulsed', 'nauseated', 'wrinkled her nose',
-        'wrinkled his nose', 'grimaced', 'grimacing', 'sickened', 'ew', 'ugh',
-    ],
-    embarrassment: [
-        'blush', 'blushed', 'blushing', 'flush', 'flushed', 'flushing', 'face red', 'red face',
-        'bright red', 'turned bright red', 'turning bright red', 'cheeks red', 'red cheeks',
-        'went red', 'turns red', 'turned red', 'ears burning',
-        'looked away', 'looks away', 'averted', 'avoids eye contact', 'avoided eye contact',
-        'not quite meeting your eyes', 'could not meet your eyes', 'mortified', 'embarrassed',
-        'embarrassment', 'sheepish', 'shy smile',
-    ],
-    excitement: [
-        'excited', 'excitement', 'thrilled', 'eager', 'bounced', 'bouncing', 'eyes sparkling',
-        'lit up', 'brightened', 'can not wait', "can't wait", 'energetic', 'enthusiastic',
-    ],
-    fear: [
-        'afraid', 'fear', 'fearful', 'scared', 'terrified', 'frightened', 'pale',
-        'wide eyed', 'wide-eyed', 'froze', 'frozen', 'trembled', 'backed away',
-        'panic', 'panicked', 'horrified',
-    ],
-    gratitude: [
-        'grateful', 'gratitude', 'thank you', 'thanks', 'thankful', 'appreciate it',
-        'appreciated', 'relieved smile', 'soft thankful smile', 'bowed her head',
-        'bowed his head',
-    ],
-    grief: [
-        'grief', 'grieving', 'mourning', 'mournful', 'sobbed', 'sobbing', 'wept',
-        'heartbroken', 'loss', 'bereft', 'voice broke', 'voice cracked', 'tears fell',
-    ],
-    joy: [
-        'happy', 'happiness', 'joy', 'joyful', 'delighted', 'beamed', 'beaming',
-        'grinned', 'grinning', 'laughed', 'laughing', 'cheerful', 'radiant smile',
-        'smiled brightly',
-    ],
-    love: [
-        'love', 'loving', 'affection', 'affectionate', 'soft smile', 'warm smile',
-        'smiled warmly', 'smiles warmly', 'tenderly', 'fondly', 'loving gaze',
-        'gentle touch', 'caressed', 'hugged', 'embraced', 'warmth in her eyes',
-        'warmth in his eyes',
-    ],
-    nervousness: [
-        'nervous', 'nervousness', 'anxious', 'uneasy', 'tremor in her voice',
-        'tremor in his voice', 'voice trembled', 'voice shaking', 'shaking', 'shaky',
-        'fidgeted', 'fidgeting', 'swallowed hard', 'sweaty palms', 'hesitated',
-        'hesitating', 'uncertain', 'worried', 'rapid breathing', 'breathing was rapid',
-        'higher pitched than usual', 'voice was higher pitched',
-    ],
-    jealous: [
-        'jealous', 'jealousy', 'envy', 'envious', 'looked jealous', 'possessive glare',
-        'who was that', 'why were you with', 'attention on someone else', 'saw you with',
-        'bitter smile', 'forced smile', 'green-eyed',
-    ],
-    neutral: [
-        'neutral', 'calm', 'blank expression', 'blank face', 'expressionless', 'deadpan',
-        'flat tone', 'even tone', 'matter of fact', 'matter-of-fact', 'composed',
-        'unreadable', 'stoic',
-    ],
-    optimism: [
-        'optimistic', 'optimism', 'hopeful', 'hope', 'confident smile', 'encouraging smile',
-        'it will be okay', 'we can do this', 'bright side', 'positive', 'reassuring',
-    ],
-    pride: [
-        'proud', 'pride', 'smug', 'smugly', 'puffed her chest', 'puffed his chest',
-        'chin lifted', 'satisfied grin', 'self satisfied', 'self-satisfied', 'boasted',
-        'boasting',
-    ],
-    realization: [
-        'realized', 'realization', 'dawned on her', 'dawned on him', 'it clicked',
-        'understood', 'understanding dawned', 'eyes widened in realization',
-        'suddenly understood', 'oh', 'aha',
-    ],
-    relief: [
-        'relieved', 'relief', 'sighed in relief', 'let out a breath', 'breathed out',
-        'thank goodness', 'shoulders relaxed', 'tension left', 'safe now',
-    ],
-    remorse: [
-        'remorse', 'remorseful', 'sorry', 'apologized', 'apologetic', 'guilt', 'guilty',
-        'regret', 'regretful', 'ashamed', 'looked guilty', 'lowered her head',
-        'lowered his head',
-    ],
-    sadness: [
-        'sad', 'sadness', 'sorrow', 'tearful', 'tears', 'crying', 'cried', 'downcast',
-        'looked down', 'melancholy', 'lonely', 'hurt', 'pained smile',
-    ],
-    surprise: [
-        'surprised', 'surprise', 'startled', 'blinked', 'eyes widened', 'wide eyes',
-        'gasped', 'taken aback', 'caught by surprise', 'shocked', 'stunned',
-    ],
-    agitation: [
-        'agitation', 'agitated', 'restless', 'paced', 'pacing', 'irritated',
-        'tail lashed', 'tail lashing', 'lashed her tail', 'lashed his tail',
-        'tapped her foot', 'tapped his foot', 'drummed her fingers', 'drummed his fingers',
-        'bristled', 'bristling',
-    ],
-    dominant: [
-        'dominant', 'commanding', 'commanded', 'ordered', 'authoritative', 'authority',
-        'took control', 'in control', 'firm voice', 'stern command', 'held your chin',
-        'pinned you', 'towered over', 'uncompromising stare',
-    ],
-    flustered: [
-        'flustered', 'stammered', 'stammering', 'stuttered', 'stuttering', 'spluttered',
-        'protested', 'protesting', 'waved her hands', 'waved his hands', 'hands flailed',
-        'fumbled', 'fumbling', 'caught off guard', 'off guard', 'panicked denial',
-        'no no', 'wait wait', 'that is not', "that's not", 'i mean', 'not like that',
-    ],
-    frustration: [
-        'frustration', 'frustrated', 'frustrations', 'frustations', 'frustrating',
-        'growled in frustration', 'sighed in frustration', 'pinched the bridge of her nose',
-        'pinched the bridge of his nose', 'threw up her hands', 'threw up his hands',
-        'gritted her teeth', 'gritted his teeth',
-    ],
-    horny: [
-        'horny', 'lustful', 'lust', 'needy', 'needily', 'turned on', 'want you',
-        'wanted you', 'craving', 'craved', 'aching need', 'desperate need',
-        'bedroom eyes', 'seductive smile', 'climax building', 'ready to go', 'wet', 'drenched', 'soaked',
-    ],
-    possessive: [
-        'possessive', 'posessive', 'possessiveness', 'mine', 'you are mine',
-        "you're mine", 'belongs to me', 'belong to me', 'claimed you', 'claiming you',
-        'pulled you closer', 'kept you close', 'protective grip',
-    ],
-    suspicious: [
-        'suspicious', 'suspicion', 'distrustful', 'distrust', 'narrowed her eyes',
-        'narrowed his eyes', 'eyes narrowed', 'skeptical', 'skepticism', 'wary',
-        'looked unconvinced', 'raised an eyebrow suspiciously', 'are you hiding something',
-    ],
-    vulnerable: [
-        'vulnerable', 'vurnerable', 'vulnerability', 'unguarded', 'fragile',
-        'voice softened', 'voice small', 'small voice', 'looked away helplessly',
-        'opened up', 'let her guard down', 'let his guard down', 'teary smile',
-        'uncertain smile',
-    ],
-};
-
-const EXPRESSION_ALIASES = {
-    admiration: 'admiration',
-    admire: 'admiration',
-    impressed: 'admiration',
-    amused: 'amusement',
-    funny: 'amusement',
-    playful: 'amusement',
-    embarrassed: 'embarrassment',
-    shy: 'embarrassment',
-    blush: 'embarrassment',
-    blushing: 'embarrassment',
-    fluster: 'flustered',
-    flustered: 'flustered',
-    excitement: 'excitement',
-    excited: 'excitement',
-    panic: 'fear',
-    panicked: 'fear',
-    nervous: 'nervousness',
-    anxiety: 'nervousness',
-    anxious: 'nervousness',
-    angry: 'anger',
-    mad: 'anger',
-    annoyed: 'annoyance',
-    irritating: 'annoyance',
-    irritated: 'agitation',
-    affection: 'love',
-    affectionate: 'love',
-    love: 'love',
-    loving: 'love',
-    happy: 'joy',
-    smile: 'joy',
-    smiling: 'joy',
-    grateful: 'gratitude',
-    thankful: 'gratitude',
-    sorry: 'remorse',
-    apologetic: 'remorse',
-    guilty: 'remorse',
-    grief: 'grief',
-    grieving: 'grief',
-    sad: 'sadness',
-    crying: 'sadness',
-    scared: 'fear',
-    afraid: 'fear',
-    shocked: 'surprise',
-    startled: 'surprise',
-    confused: 'confusion',
-    curious: 'curiosity',
-    desire: 'desire',
-    wanting: 'desire',
-    aroused: 'arousal',
-    arousal: 'arousal',
-    disappointed: 'disappointment',
-    disapproving: 'disapproval',
-    disgusted: 'disgust',
-    neutral: 'neutral',
-    optimistic: 'optimism',
-    hopeful: 'optimism',
-    proud: 'pride',
-    realized: 'realization',
-    relieved: 'relief',
-    dominant: 'dominant',
-    commanding: 'dominant',
-    frustrated: 'frustration',
-    frustration: 'frustration',
-    frustrations: 'frustration',
-    frustations: 'frustration',
-    horny: 'horny',
-    lust: 'horny',
-    lustful: 'horny',
-    jealous: 'jealousy',
-    jealousy: 'jealousy',
-    possessive: 'possessive',
-    posessive: 'possessive',
-    suspicious: 'suspicious',
-    suspicion: 'suspicious',
-    vulnerable: 'vulnerable',
-    vurnerable: 'vulnerable',
-};
-
-function getExpressionHintKeys(expressionName) {
-    const normalized = normalizeName(expressionName).replace(/_/g, ' ').trim();
-    const tokens = normalized.split(/\s+/).filter(Boolean);
-    const keys = new Set();
-
-    if (EXPRESSION_HINTS[normalized]) {
-        keys.add(normalized);
-    }
-
-    for (const token of tokens) {
-        if (EXPRESSION_HINTS[token]) {
-            keys.add(token);
-        }
-        if (EXPRESSION_ALIASES[token]) {
-            keys.add(EXPRESSION_ALIASES[token]);
-        }
-    }
-
-    if (normalized.includes('fluster')) keys.add('flustered');
-    if (normalized.includes('admir') || normalized.includes('impress')) keys.add('admiration');
-    if (normalized.includes('amus') || normalized.includes('playful') || normalized.includes('teas')) keys.add('amusement');
-    if (normalized.includes('embarrass') || normalized.includes('blush') || normalized.includes('shy')) keys.add('embarrassment');
-    if (normalized.includes('excit') || normalized.includes('thrill') || normalized.includes('eager')) keys.add('excitement');
-    if (normalized.includes('nerv') || normalized.includes('anx')) keys.add('nervousness');
-    if (normalized.includes('ang') || normalized.includes('mad') || normalized.includes('furious')) keys.add('anger');
-    if (normalized.includes('annoy') || normalized.includes('exasperat')) keys.add('annoyance');
-    if (normalized.includes('approv') || normalized.includes('pleased')) keys.add('approval');
-    if (normalized.includes('caring') || normalized.includes('concern') || normalized.includes('comfort')) keys.add('caring');
-    if (normalized.includes('confus') || normalized.includes('puzzl')) keys.add('confusion');
-    if (normalized.includes('curio') || normalized.includes('intrigu')) keys.add('curiosity');
-    if (normalized.includes('desire') || normalized.includes('want') || normalized.includes('longing')) keys.add('desire');
-    if (normalized.includes('arous') || normalized.includes('heated')) keys.add('arousal');
-    if (normalized.includes('disappoint')) keys.add('disappointment');
-    if (normalized.includes('disapprov')) keys.add('disapproval');
-    if (normalized.includes('disgust') || normalized.includes('repuls') || normalized.includes('gross')) keys.add('disgust');
-    if (normalized.includes('grat') || normalized.includes('thank')) keys.add('gratitude');
-    if (normalized.includes('grief') || normalized.includes('mourn')) keys.add('grief');
-    if (normalized.includes('affection') || normalized.includes('love') || normalized.includes('tender')) keys.add('love');
-    if (normalized.includes('agitat') || normalized.includes('irritat') || normalized.includes('restless')) keys.add('agitation');
-    if (normalized.includes('neutral') || normalized.includes('blank') || normalized.includes('deadpan')) keys.add('neutral');
-    if (normalized.includes('optim') || normalized.includes('hope')) keys.add('optimism');
-    if (normalized.includes('pride') || normalized.includes('proud') || normalized.includes('smug')) keys.add('pride');
-    if (normalized.includes('realiz') || normalized.includes('realis') || normalized.includes('understand')) keys.add('realization');
-    if (normalized.includes('relief') || normalized.includes('reliev')) keys.add('relief');
-    if (normalized.includes('remorse') || normalized.includes('sorry') || normalized.includes('guilt') || normalized.includes('regret')) keys.add('remorse');
-    if (normalized.includes('sad') || normalized.includes('cry') || normalized.includes('tear')) keys.add('sadness');
-    if (normalized.includes('fear') || normalized.includes('scared') || normalized.includes('afraid')) keys.add('fear');
-    if (normalized.includes('happy') || normalized.includes('joy') || normalized.includes('smile') || normalized.includes('laugh')) keys.add('joy');
-    if (normalized.includes('surpris') || normalized.includes('shock') || normalized.includes('startl')) keys.add('surprise');
-    if (normalized.includes('jealous') || normalized.includes('envy') || normalized.includes('envious')) keys.add('jealousy');
-    if (normalized.includes('domin') || normalized.includes('command')) keys.add('dominant');
-    if (normalized.includes('frustrat') || normalized.includes('frustat')) keys.add('frustration');
-    if (normalized.includes('horny') || normalized.includes('lust')) keys.add('horny');
-    if (normalized.includes('possess') || normalized.includes('posess')) keys.add('possessive');
-    if (normalized.includes('suspic') || normalized.includes('distrust') || normalized.includes('skeptic') || normalized.includes('wary')) keys.add('suspicious');
-    if (normalized.includes('vulner') || normalized.includes('vurner') || normalized.includes('unguarded')) keys.add('vulnerable');
-
-    return [...keys];
-}
-
 function scoreExpressionFromText(messageText, availableEntries) {
     const lower = String(messageText || '').toLowerCase();
-    const cleaned = lower.replace(/[^\w\s-]/g, ' ');
+    const cleaned = normalizeHintText(lower);
     let best = null;
 
     for (const entry of availableEntries) {
@@ -989,7 +845,8 @@ function scoreExpressionFromText(messageText, availableEntries) {
 
         for (const key of hintKeys) {
             for (const hint of EXPRESSION_HINTS[key] || []) {
-                if (lower.includes(hint)) {
+                const normalizedHint = normalizeHintText(hint);
+                if (normalizedHint && textIncludesNeedle(cleaned, normalizedHint)) {
                     score += hint.includes(' ') ? 2 : 1;
                 }
             }
@@ -1015,7 +872,7 @@ function selectEntryForCharacter(groups, characterKey, messageText) {
             normalizeName(parsed.expression).replace(/_/g, ' ').trim(),
         ].filter(Boolean);
 
-        if (needles.some(needle => cleaned.includes(needle))) {
+        if (needles.some(needle => textIncludesNeedle(cleaned, needle))) {
             return entry;
         }
     }
@@ -1028,14 +885,26 @@ function selectEntryForCharacter(groups, characterKey, messageText) {
     return entries.length === 1 ? entries[0].entry : null;
 }
 
+function getFallbackEntryForCharacter(groups, characterKey) {
+    const entries = groups.get(characterKey) || [];
+    if (!entries.length) return null;
+
+    const preferred = entries.find(({ parsed }) => {
+        const expression = normalizeName(parsed.expression);
+        return expression.includes('neutral') || expression.includes('normal') || expression.includes('default');
+    });
+
+    return (preferred || entries[0]).entry;
+}
+
 function findEntryMatchInText(entries, messageText, preferredCharacter = '') {
     const cleaned = String(messageText || '').toLowerCase().replace(/[^\w\s]/g, ' ');
     const normalizedPreferredCharacter = normalizeName(preferredCharacter);
     const prioritizedEntries = normalizedPreferredCharacter
-        ? entries.filter(entry => {
-            const parsed = parseEntryName(entry.name);
-            return !parsed.character || parsed.character === normalizedPreferredCharacter;
-        })
+        ? [
+            ...entries.filter(entry => parseEntryName(entry.name).character === normalizedPreferredCharacter),
+            ...entries.filter(entry => parseEntryName(entry.name).character !== normalizedPreferredCharacter),
+        ]
         : entries;
 
     for (const entry of prioritizedEntries) {
@@ -1043,10 +912,9 @@ function findEntryMatchInText(entries, messageText, preferredCharacter = '') {
         const needles = [
             normalizeName(parsed.raw).replace(/_/g, ' '),
             normalizeName(parsed.expression).replace(/_/g, ' '),
-            parsed.character?.replace(/_/g, ' '),
         ].filter(Boolean);
 
-        if (needles.some(needle => cleaned.includes(needle))) {
+        if (needles.some(needle => textIncludesNeedle(cleaned, needle))) {
             return entry;
         }
     }
@@ -1072,120 +940,90 @@ function splitParagraphsWithOffsets(text) {
     return paragraphs;
 }
 
-/**
- * Memanggil AI untuk mendeteksi ekspresi yang sesuai dengan pesan
- * @param {string} messageText - Teks pesan dari karakter
- * @param {Array} entries - Daftar ekspresi yang tersedia
- * @param {string} characterName - Nama karakter
- * @returns {Promise<string|null>} - Nama ekspresi yang dipilih AI atau null
- */
-async function detectExpressionWithAI(messageText, entries, characterName) {
-    if (!entries || entries.length === 0) return null;
+function splitTextSegmentsWithOffsets(text, characterKeys = []) {
+    const value = String(text || '');
+    const segments = [];
+    const regex = /[^\r\n.!?]+(?:[.!?]+|$)/g;
+    let match;
 
-    const settings = ensureSettings();
-    const providerConfig = getProviderConfig(settings.apiProvider);
+    while ((match = regex.exec(value)) !== null) {
+        const raw = match[0];
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
 
-    // Validasi bahwa API sudah dikonfigurasi
-    if (!settings.apiProvider) {
-        console.warn('Advanced Expressions: API provider not configured');
-        return null;
+        segments.push({
+            text: trimmed,
+            start: match.index,
+            end: match.index + raw.length,
+        });
     }
 
-    if (!providerConfig) {
-        console.warn('Advanced Expressions: invalid API provider configuration');
-        return null;
+    const baseSegments = segments.length ? segments : splitParagraphsWithOffsets(value);
+    const expandedSegments = [];
+
+    for (const segment of baseSegments) {
+        const mentionSegments = splitSegmentByCharacterMentions(segment, characterKeys);
+        expandedSegments.push(...mentionSegments);
     }
 
-    if (providerRequiresApiKey(settings.apiProvider) && !settings.apiKey) {
-        console.warn('Advanced Expressions: API key not configured');
-        return null;
+    return expandedSegments.length ? expandedSegments : baseSegments;
+}
+
+function splitSegmentByCharacterMentions(segment, characterKeys = []) {
+    if (!Array.isArray(characterKeys) || characterKeys.length < 2) {
+        return [segment];
     }
 
-    if (providerConfig.editable && !settings.customBaseUrl && !providerConfig.baseUrl) {
-        console.warn('Advanced Expressions: custom base URL is required for this provider');
-        return null;
-    }
+    const matches = [];
 
-    // Cek cache terlebih dahulu
-    // Include characterName AND entry names in hash to prevent cross-character cache collisions.
-    const entrySignature = entries.map(e => e.name).join('|');
-    const messageHash = getStringHash(`${EXPRESSION_DETECTION_VERSION}::${characterName}::${messageText}::${entrySignature}`);
-    if (aiExpressionCache.has(messageHash)) {
-        return aiExpressionCache.get(messageHash);
-    }
+    for (const character of characterKeys) {
+        const plainName = String(character || '').replace(/_/g, ' ').trim();
+        if (!plainName) continue;
 
-    try {
-        // Siapkan daftar ekspresi yang tersedia
-        const availableExpressions = entries
-            .map(e => ({
-                name: e.name,
-                displayName: parseEntryName(e.name).expression
-            }))
-            .filter(e => e.displayName);
+        const pattern = new RegExp(`\\b${escapeRegExp(plainName)}\\b\\s*[:\\-\\u2013\\u2014]?`, 'gi');
+        let match;
 
-        if (availableExpressions.length === 0) return null;
-        if (!settings.apiModel) {
-            console.warn('Advanced Expressions: API model not configured');
-            return null;
+        while ((match = pattern.exec(segment.text)) !== null) {
+            matches.push({
+                character,
+                index: match.index,
+            });
         }
-
-        // Buat prompt untuk AI
-        const prompt = `You are selecting an expression image for the character "${characterName}".
-
-Available expressions (these all belong to "${characterName}"): ${availableExpressions.map(e => e.displayName).join(', ')}
-
-Message from "${characterName}": "${messageText}"
-
-Choose ONE expression from the list above that best matches the visible, dominant facial/body expression in this specific message.
-Prefer the emotion shown by physical cues and dialogue delivery over romantic or narrative subtext.
-Examples: blush, looking away, stammering, or panicked denial should usually be "flustered" or "embarrassment", not "love"; glaring or snapped delivery should be anger/agitation; trembling or hesitation should be nervousness/fear.
-Respond ONLY with the exact expression name from the list. No explanation.`;
-
-        // Panggil API provider yang dipilih
-        const aiResponse = await callAIProvider(
-            settings.apiProvider,
-            settings.apiKey,
-            prompt,
-            {
-                model: settings.apiModel || undefined,
-                customBaseUrl: settings.customBaseUrl || undefined,
-                maxTokens: 50,
-                temperature: 0.3
-            }
-        );
-
-        if (!aiResponse) {
-            console.warn('AI expression detection returned empty response');
-            return null;
-        }
-
-        const responseText = normalizeName(aiResponse.trim()).replace(/_/g, ' ');
-
-        // Cari ekspresi yang sesuai dengan respons AI
-        const matchedExpression = availableExpressions.find(e => 
-            responseText.includes(normalizeName(e.displayName).replace(/_/g, ' '))
-        );
-
-        const selectedExpression = matchedExpression ? matchedExpression.name : null;
-        
-        // Cache hasil — also persist to localStorage so it survives page restarts.
-        aiExpressionCache.set(messageHash, selectedExpression);
-        saveAiExpressionCache(aiExpressionCache);
-        
-        return selectedExpression;
-    } catch (error) {
-        console.error('Error calling AI for expression detection:', error);
-        return null;
     }
+
+    matches.sort((a, b) => a.index - b.index);
+
+    const uniqueCharacters = new Set(matches.map(match => match.character));
+    if (matches.length < 2 || uniqueCharacters.size < 2) {
+        return [segment];
+    }
+
+    const result = [];
+    for (let index = 0; index < matches.length; index++) {
+        const start = matches[index].index;
+        const end = matches[index + 1]?.index ?? segment.text.length;
+        const text = segment.text.slice(start, end).trim();
+        if (!text) continue;
+
+        const leadingWhitespace = segment.text.slice(start, end).search(/\S/);
+        const adjustedStart = segment.start + start + Math.max(leadingWhitespace, 0);
+        result.push({
+            text,
+            start: adjustedStart,
+            end: segment.start + end,
+        });
+    }
+
+    return result.length ? result : [segment];
 }
 
 function analyzeParagraphDominance(text, characterKeys) {
-    const paragraphs = splitParagraphsWithOffsets(text);
-    const assignments = paragraphs.map(paragraph => {
-        const scores = scoreCharacters(paragraph.text, characterKeys);
+    const segments = splitTextSegmentsWithOffsets(text, characterKeys);
+    const assignments = segments.map(segment => {
+        const scores = scoreCharacters(segment.text, characterKeys);
         const top = scores[0];
         return {
-            ...paragraph,
+            ...segment,
             character: top?.score > 0 ? top.character : null,
             score: top?.score || 0,
         };
@@ -1224,7 +1062,7 @@ function analyzeParagraphDominance(text, characterKeys) {
     const sortedCounts = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
     const primary = sortedCounts[0]?.[0] || null;
     const secondary = sortedCounts[1]?.[0] || null;
-    const totalParagraphs = paragraphs.length || 1;
+    const totalParagraphs = segments.length || 1;
     const primaryCount = primary ? counts.get(primary) || 0 : 0;
     const secondaryCount = secondary ? counts.get(secondary) || 0 : 0;
     const isSingleDominant = !!primary && firstChar === primary && lastChar === primary && primaryCount >= totalParagraphs * 0.6 && primaryCount >= Math.max(secondaryCount * 1.5, 1);
@@ -1246,6 +1084,20 @@ function analyzeParagraphDominance(text, characterKeys) {
     };
 }
 
+function getTextForCharacter(text, dominance, characterKey) {
+    const key = normalizeName(characterKey || '');
+    if (!key || !dominance?.assignments?.length) {
+        return String(text || '');
+    }
+
+    const segments = dominance.assignments
+        .filter(segment => segment.character === key)
+        .map(segment => segment.text)
+        .filter(Boolean);
+
+    return segments.length ? segments.join('\n') : String(text || '');
+}
+
 function pickDominantBlock(blocksByCharacter, character) {
     const blocks = blocksByCharacter.get(character) || [];
     if (!blocks.length) return null;
@@ -1265,6 +1117,10 @@ function buildPlaceholder(name) {
 
 function createId() {
     return crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function isInsideCode(node) {
@@ -1294,6 +1150,58 @@ function clearAutoInjectedExpressions(root) {
 
     root.querySelectorAll?.('.image-embeds-ai-marker').forEach(node => node.remove());
     revertInjectedPlaceholders(root);
+    removeDuplicatePlaceholders(root);
+}
+
+function getCurrentCardExpressionEntries() {
+    return [...getCharacterEntries(), ...getUserEntries()]
+        .filter(entry => entry?.name);
+}
+
+function removeExpressionPlaceholdersForEntries(root, entries) {
+    if (!root || !entries?.length) return;
+
+    const names = new Set();
+    for (const entry of entries) {
+        names.add(normalizeName(entry.name));
+    }
+
+    root.querySelectorAll?.('.image-embed-expression').forEach(node => {
+        // Regenerate is intentionally strict for the open chat: remove rendered
+        // expression images so old cross-character picks cannot block reinjection.
+        node.remove();
+    });
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const updates = [];
+    let current;
+
+    while ((current = walker.nextNode())) {
+        if (isInsideCode(current)) continue;
+        const text = current.nodeValue || '';
+        PLACEHOLDER_REGEX.lastIndex = 0;
+        if (!PLACEHOLDER_REGEX.test(text)) continue;
+
+        PLACEHOLDER_REGEX.lastIndex = 0;
+        let changed = false;
+        const rebuilt = text.replace(PLACEHOLDER_REGEX, (fullMatch, rawName) => {
+            if (names.has(normalizeName(rawName))) {
+                changed = true;
+                return '';
+            }
+            return fullMatch;
+        });
+
+        if (changed) {
+            updates.push({ node: current, value: rebuilt.replace(/\n{3,}/g, '\n\n') });
+        }
+    }
+
+    for (const update of updates) {
+        update.node.nodeValue = update.value;
+    }
+
+    PLACEHOLDER_REGEX.lastIndex = 0;
     removeDuplicatePlaceholders(root);
 }
 
@@ -1406,6 +1314,71 @@ function getPlacementCharacterKey(placement) {
     return normalizeName(key || DEFAULT_CHARACTER_GROUP);
 }
 
+async function refinePlacementWithAI(placement, allEntries, messageText, dominance, characterKey) {
+    const targetCharacter = normalizeName(characterKey || getPlacementCharacterKey(placement));
+    if (!targetCharacter || targetCharacter === DEFAULT_CHARACTER_GROUP) {
+        return placement;
+    }
+
+    const entries = filterEntriesForCharacter(allEntries, targetCharacter, { includeDefault: true });
+    if (!entries.length) {
+        return placement;
+    }
+
+    const scopedMessageText = getTextForCharacter(messageText, dominance, targetCharacter);
+    const displayName = targetCharacter.replace(/_/g, ' ');
+    const selectedExpressionName = await detectExpressionWithAI({
+        messageText: scopedMessageText,
+        entries,
+        characterName: displayName,
+        settings: ensureSettings(),
+        parseEntryName,
+        normalizeName,
+    });
+    if (!selectedExpressionName) {
+        return placement;
+    }
+
+    const selectedEntry = entries.find(entry => entry.name === selectedExpressionName);
+    if (!selectedEntry) {
+        return placement;
+    }
+
+    return { ...placement, entry: selectedEntry, character: targetCharacter, targetCharacter };
+}
+
+async function refinePlacementsWithAI(placements, allEntries, messageText, dominance, characterKeys, allowMultiple) {
+    const result = [];
+    const usedCharacters = new Set();
+    const maxCount = allowMultiple ? 2 : 1;
+
+    for (const placement of placements || []) {
+        if (result.length >= maxCount) break;
+        const character = getPlacementCharacterKey(placement);
+        if (usedCharacters.has(character)) continue;
+
+        const refined = await refinePlacementWithAI(placement, allEntries, messageText, dominance, character);
+        result.push(refined);
+        usedCharacters.add(character);
+    }
+
+    for (const character of characterKeys || []) {
+        if (result.length >= maxCount) break;
+        const normalizedCharacter = normalizeName(character);
+        if (!normalizedCharacter || usedCharacters.has(normalizedCharacter)) continue;
+
+        const fallbackEntry = getFallbackEntryForCharacter(groupEntriesByCharacter(allEntries), normalizedCharacter);
+        if (!fallbackEntry) continue;
+
+        const placement = buildPlacementForEntry(fallbackEntry, normalizedCharacter, dominance, normalizedCharacter);
+        const refined = await refinePlacementWithAI(placement, allEntries, messageText, dominance, normalizedCharacter);
+        result.push(refined);
+        usedCharacters.add(normalizedCharacter);
+    }
+
+    return result.length ? result.slice(0, maxCount) : placements;
+}
+
 function dedupePlacementsByEntryAndCharacter(placements, allowMultiple = false) {
     const result = [];
     const seenEntries = new Set();
@@ -1461,10 +1434,10 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
     if (message.is_user) {
         const userEntries = getUserEntries();
         if (!userEntries.length) return [];
-        
+
         const messageText = String(message.mes || '').toLowerCase();
         const cleaned = messageText.replace(/[^\w\s]/g, ' ');
-        
+
         const maxCount = allowMultiple ? 2 : 1;
         const selected = [];
         const seenEntries = new Set();
@@ -1495,22 +1468,47 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
     }
 
     // Handle character/assistant messages
-    const entries = getCharacterEntries();
+    const messageTextRaw = String(message.mes || '');
+    const activeCardEntries = getCharacterEntries();
+    const usingCrossPackEntries = activeCardEntries.length === 0;
+    const entries = activeCardEntries.length
+        ? activeCardEntries
+        : getCrossPackEntriesForMessage(messageTextRaw);
     if (!entries.length) return [];
 
     const settings = ensureSettings();
-    const messageTextRaw = String(message.mes || '');
     const messageText = messageTextRaw.toLowerCase();
     const grouped = groupEntriesByCharacter(entries);
     const characterKeys = Array.from(grouped.keys()).filter(key => key && key !== DEFAULT_CHARACTER_GROUP);
-    const messageCharacterKey = resolveMessageCharacterKey(messageId, characterKeys);
+    const strictCharacterScopedEntries = hasStrictCharacterScopedEntries(entries);
+    let activeMessageCharacterKeys = strictCharacterScopedEntries
+        ? detectActiveCharacterKeys(messageTextRaw, characterKeys)
+        : [];
+    if (usingCrossPackEntries && strictCharacterScopedEntries && !activeMessageCharacterKeys.length) {
+        activeMessageCharacterKeys = scoreCharacters(messageTextRaw, characterKeys)
+            .filter(result => result.score > 0)
+            .map(result => result.character);
+    }
+    const eligibleCharacterKeys = activeMessageCharacterKeys.length ? activeMessageCharacterKeys : characterKeys;
+    const messageCharacterKey = resolveMessageCharacterKey(messageId, eligibleCharacterKeys);
     const activeCharacterKey = getActiveCharacterExpressionKey();
-    const characterScores = characterKeys.length ? scoreCharacters(messageText, characterKeys) : [];
-    const dominance = analyzeParagraphDominance(messageTextRaw, characterKeys);
+    const recentContext = buildRecentInteractionContext(messageId, eligibleCharacterKeys);
+    const characterScores = eligibleCharacterKeys.length ? scoreCharacters(messageText, eligibleCharacterKeys) : [];
+    const dominance = analyzeParagraphDominance(messageTextRaw, eligibleCharacterKeys);
     const selected = [];
     let maxCount = allowMultiple ? 2 : 1;
 
-    if (allowMultiple && characterScores.length > 1) {
+    if (strictCharacterScopedEntries && isUnknownLeadingCharacter(messageTextRaw, characterKeys)) {
+        return [];
+    }
+
+    if (strictCharacterScopedEntries && characterKeys.length > 1 && !activeMessageCharacterKeys.length) {
+        return [];
+    }
+
+    if (allowMultiple && activeMessageCharacterKeys.length > 1) {
+        maxCount = Math.min(2, activeMessageCharacterKeys.length);
+    } else if (allowMultiple && characterScores.length > 1) {
         const primaryScore = characterScores[0];
         const secondaryScore = characterScores[1];
         if (!secondaryScore || secondaryScore.score < 1 || (primaryScore && secondaryScore.score < primaryScore.score * 0.5)) {
@@ -1518,7 +1516,7 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
         }
     }
 
-    if (dominance.isSingleDominant) {
+    if (dominance.isSingleDominant && activeMessageCharacterKeys.length <= 1) {
         maxCount = 1;
     }
 
@@ -1529,13 +1527,23 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
         desiredCharacters.push(messageCharacterKey);
     }
 
+    for (const character of activeMessageCharacterKeys) {
+        if (grouped.has(character) && !desiredCharacters.includes(character)) {
+            desiredCharacters.push(character);
+        }
+    }
+
     if (dominance.primary) {
         desiredCharacters.push(dominance.primary);
     } else if (characterScores[0]) {
         desiredCharacters.push(characterScores[0].character);
     }
 
-    if (!desiredCharacters.length && activeCharacterKey && grouped.has(activeCharacterKey)) {
+    if (!desiredCharacters.length && recentContext.primary && grouped.has(recentContext.primary)) {
+        desiredCharacters.push(recentContext.primary);
+    }
+
+    if (!desiredCharacters.length && !strictCharacterScopedEntries && activeCharacterKey && grouped.has(activeCharacterKey)) {
         desiredCharacters.push(activeCharacterKey);
     }
 
@@ -1547,7 +1555,13 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
     }
 
     for (const character of desiredCharacters) {
-        const entry = selectEntryForCharacter(grouped, character, messageText);
+        const scopedMessageText = getTextForCharacter(messageTextRaw, dominance, character);
+        const fullMessageEntry = selectEntryForCharacter(grouped, character, messageTextRaw);
+        const scopedEntry = selectEntryForCharacter(grouped, character, scopedMessageText);
+        const entry = (activeMessageCharacterKeys.length <= 1 ? fullMessageEntry : scopedEntry)
+            || scopedEntry
+            || fullMessageEntry
+            || (activeMessageCharacterKeys.includes(character) ? getFallbackEntryForCharacter(grouped, character) : null);
         const key = entry ? (entry.id || entry.url || entry.name) : null;
         if (entry && !seenEntries.has(key)) {
             selected.push(buildPlacementForEntry(entry, character, dominance, character));
@@ -1561,7 +1575,13 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
     }
 
     const preferredDirectCharacter = messageCharacterKey || dominance.primary || characterScores[0]?.character || activeCharacterKey;
-    const directMatch = findEntryMatchInText(entries, messageText, preferredDirectCharacter);
+    const directMessageText = preferredDirectCharacter
+        ? getTextForCharacter(messageTextRaw, dominance, preferredDirectCharacter)
+        : messageText;
+    const directEntries = preferredDirectCharacter
+        ? filterEntriesForCharacter(entries, preferredDirectCharacter, { includeDefault: true })
+        : entries;
+    const directMatch = findEntryMatchInText(directEntries, directMessageText, preferredDirectCharacter);
     const directKey = directMatch ? (directMatch.id || directMatch.url || directMatch.name) : null;
     if (directMatch && !seenEntries.has(directKey)) {
         const parsed = parseEntryName(directMatch.name);
@@ -1586,6 +1606,24 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
         }
     }
 
+    if (selected.length === 0) {
+        const scoredEntries = preferredDirectCharacter
+            ? filterEntriesForCharacter(entries, preferredDirectCharacter, { includeDefault: true })
+            : entries;
+        const scoredFallback = scoreExpressionFromText(messageTextRaw, scoredEntries.length ? scoredEntries : entries);
+        const scoredKey = scoredFallback ? (scoredFallback.id || scoredFallback.url || scoredFallback.name) : null;
+
+        if (scoredFallback && !seenEntries.has(scoredKey)) {
+            const parsed = parseEntryName(scoredFallback.name);
+            const targetCharacter = parsed.character || preferredDirectCharacter || activeCharacterKey || DEFAULT_CHARACTER_GROUP;
+            selected.push(buildPlacementForEntry(scoredFallback, targetCharacter, dominance, targetCharacter));
+            seenEntries.add(scoredKey);
+            if (selected.length >= maxCount) {
+                return selected;
+            }
+        }
+    }
+
     const disambiguationNeeded = grouped.size > 1 || entries.length > 1;
     if (disambiguationNeeded) {
         return selected;
@@ -1594,13 +1632,8 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
     const fallbackCharacter = (activeCharacterKey && grouped.has(activeCharacterKey))
         ? activeCharacterKey
         : (characterKeys[0] || DEFAULT_CHARACTER_GROUP);
-    const fallbackIsExplicitCharacter = fallbackCharacter && fallbackCharacter !== DEFAULT_CHARACTER_GROUP;
-    const fallbackMatchesActiveCharacter = fallbackIsExplicitCharacter && fallbackCharacter === activeCharacterKey;
-    if (fallbackIsExplicitCharacter && !fallbackMatchesActiveCharacter) {
-        return selected;
-    }
-
-    const fallbackEntry = selectEntryForCharacter(grouped, fallbackCharacter, messageText);
+    const fallbackMessageText = getTextForCharacter(messageTextRaw, dominance, fallbackCharacter);
+    const fallbackEntry = selectEntryForCharacter(grouped, fallbackCharacter, fallbackMessageText);
     const fallbackKey = fallbackEntry ? (fallbackEntry.id || fallbackEntry.url || fallbackEntry.name) : null;
     if (fallbackEntry && !seenEntries.has(fallbackKey)) {
         selected.push(buildPlacementForEntry(fallbackEntry, fallbackCharacter, dominance, fallbackCharacter));
@@ -1615,9 +1648,20 @@ async function pickEntriesForMessage(messageId, allowMultiple = false) {
     const cacheEntries = message?.is_user ? getUserEntries() : getCharacterEntries();
     const groupedEntries = groupEntriesByCharacter(cacheEntries);
     const contextCharacterKeys = Array.from(groupedEntries.keys()).filter(key => key && key !== DEFAULT_CHARACTER_GROUP);
-    const messageCharacterKey = resolveMessageCharacterKey(messageId, contextCharacterKeys);
-    const recentContext = buildRecentInteractionContext(messageId, contextCharacterKeys);
-    const aiCharacterName = messageCharacterKey || getActiveCharacterExpressionKey() || characters?.[this_chid]?.name || 'Character';
+    const strictCharacterScopedEntries = !message?.is_user && hasStrictCharacterScopedEntries(cacheEntries);
+    const activeMessageCharacterKeys = strictCharacterScopedEntries
+        ? detectActiveCharacterKeys(String(message?.mes || ''), contextCharacterKeys)
+        : [];
+    const eligibleCharacterKeys = activeMessageCharacterKeys.length ? activeMessageCharacterKeys : contextCharacterKeys;
+    const messageCharacterKey = resolveMessageCharacterKey(messageId, eligibleCharacterKeys);
+    const recentContext = buildRecentInteractionContext(messageId, eligibleCharacterKeys);
+    const speakerCharacterKey = getMessageSpeakerKey(message, eligibleCharacterKeys);
+    const activeCharacterKey = getActiveCharacterExpressionKey();
+    const targetCharacterKey = speakerCharacterKey
+        || messageCharacterKey
+        || (!strictCharacterScopedEntries && contextCharacterKeys.some(key => characterKeysMatch(key, activeCharacterKey)) ? activeCharacterKey : '')
+        || (eligibleCharacterKeys.length === 1 ? eligibleCharacterKeys[0] : '');
+    const aiCharacterName = targetCharacterKey || recentContext.primary || activeCharacterKey || characters?.[this_chid]?.name || 'Character';
     const cacheKey = getStringHash(JSON.stringify({
         messageId,
         messageText: String(message?.mes || ''),
@@ -1626,9 +1670,13 @@ async function pickEntriesForMessage(messageId, allowMultiple = false) {
         advancedEnabled: !!settings.advancedExpressionsEnabled,
         detectionVersion: EXPRESSION_DETECTION_VERSION,
         currentMode,
-        activeCharacter: getActiveCharacterExpressionKey(),
+        activeCharacter: activeCharacterKey,
+        speakerCharacter: speakerCharacterKey,
+        targetCharacter: targetCharacterKey,
         messageCharacter: messageCharacterKey,
         recentContext: recentContext.primary,
+        activeMessageCharacters: activeMessageCharacterKeys,
+        llmEligible: canUseLLMForMessage(messageId),
         entries: cacheEntries.map(entry => `${entry.id || ''}:${entry.name || ''}:${entry.url || ''}`),
     }));
 
@@ -1638,17 +1686,9 @@ async function pickEntriesForMessage(messageId, allowMultiple = false) {
 
     const legacySelections = pickEntriesForMessageLegacy(messageId, allowMultiple);
 
-    if (!message || message.is_system || message.is_user || !settings.advancedExpressionsEnabled) {
-        messagePlacementCache.set(cacheKey, legacySelections);
-        return legacySelections;
-    }
+    const canUseAdvancedLLM = !!settings.advancedExpressionsEnabled && canUseLLMForMessage(messageId);
 
-    if (legacySelections.length > 0) {
-        messagePlacementCache.set(cacheKey, legacySelections);
-        return legacySelections;
-    }
-
-    if (!isRecentAssistantMessage(messageId)) {
+    if (!message || message.is_system || message.is_user || !canUseAdvancedLLM) {
         messagePlacementCache.set(cacheKey, legacySelections);
         return legacySelections;
     }
@@ -1659,45 +1699,82 @@ async function pickEntriesForMessage(messageId, allowMultiple = false) {
         return legacySelections;
     }
 
-    // Filter entries to only include expressions belonging to the active/speaking character.
-    // This prevents AI from picking Miyuki's expression when Virelya is speaking.
-    // We compare normalized character names to handle all separator formats:
-    //   Evelyn/smile, NameChar_pose, Violet-huhu, Miko|focused, etc.
-    const normalizedAiChar = normalizeName(aiCharacterName);
-    let hasExplicitCharacterEntries = false;
-    const filteredEntries = allEntries.filter(e => {
-        const parsed = parseEntryName(e.name);
-        if (!parsed.character) {
-            // No character prefix → ungrouped entry, include it
-            return true;
-        }
-        hasExplicitCharacterEntries = true;
-        // Match normalized character names; also try stripping separators from
-        // the parsed character in case normalizeName left a `-` or `|` in place.
-        const parsedCharClean = parsed.character.replace(/[-|_\s]+/g, '');
-        const aiCharClean = normalizedAiChar.replace(/[-|_\s]+/g, '');
-        return parsed.character === normalizedAiChar || parsedCharClean === aiCharClean;
-    });
-
-    if (filteredEntries.length === 0 && hasExplicitCharacterEntries) {
+    if (hasStrictCharacterScopedEntries(allEntries) && isUnknownLeadingCharacter(String(message.mes || ''), contextCharacterKeys)) {
         messagePlacementCache.set(cacheKey, legacySelections);
         return legacySelections;
     }
 
-    // Fall back to all entries only when every entry is ungrouped/generic.
-    const entries = filteredEntries.length > 0 ? filteredEntries : allEntries;
+    if (hasStrictCharacterScopedEntries(allEntries) && contextCharacterKeys.length > 1 && !activeMessageCharacterKeys.length) {
+        messagePlacementCache.set(cacheKey, legacySelections);
+        return legacySelections;
+    }
+
+    if (!targetCharacterKey && contextCharacterKeys.length > 1) {
+        messagePlacementCache.set(cacheKey, legacySelections);
+        return legacySelections;
+    }
+
+    // Filter entries to only include expressions belonging to the speaking character.
+    // If Flo is speaking, Miyuki/Sayaka-prefixed entries must never be candidates.
+    const entries = targetCharacterKey
+        ? filterEntriesForCharacter(allEntries, targetCharacterKey, { includeDefault: true })
+        : allEntries;
+
+    if (!entries.length) {
+        messagePlacementCache.set(cacheKey, legacySelections);
+        return legacySelections;
+    }
 
     const messageTextRaw = String(message.mes || '');
-    const aiSelectedExpressionName = await detectExpressionWithAI(messageTextRaw, entries, aiCharacterName);
+    const dominance = analyzeParagraphDominance(messageTextRaw, eligibleCharacterKeys);
+
+    if (allowMultiple && settings.doubleEnabled && activeMessageCharacterKeys.length > 1) {
+        const refinedSelections = await refinePlacementsWithAI(
+            legacySelections,
+            allEntries,
+            messageTextRaw,
+            dominance,
+            activeMessageCharacterKeys,
+            true,
+        );
+        messagePlacementCache.set(cacheKey, refinedSelections);
+        consumeLLMEligibility(messageId);
+        return refinedSelections;
+    }
+
+    if (legacySelections.length > 0) {
+        const refinedSelections = await refinePlacementsWithAI(
+            legacySelections,
+            allEntries,
+            messageTextRaw,
+            dominance,
+            activeMessageCharacterKeys,
+            allowMultiple && settings.doubleEnabled,
+        );
+        messagePlacementCache.set(cacheKey, refinedSelections);
+        consumeLLMEligibility(messageId);
+        return refinedSelections;
+    }
+
+    const aiSelectedExpressionName = await detectExpressionWithAI({
+        messageText: getTextForCharacter(messageTextRaw, dominance, targetCharacterKey),
+        entries,
+        characterName: aiCharacterName,
+        settings,
+        parseEntryName,
+        normalizeName,
+    });
 
     if (!aiSelectedExpressionName) {
         messagePlacementCache.set(cacheKey, legacySelections);
+        consumeLLMEligibility(messageId);
         return legacySelections;
     }
 
     const aiSelectedEntry = entries.find(e => e.name === aiSelectedExpressionName);
     if (!aiSelectedEntry) {
         messagePlacementCache.set(cacheKey, legacySelections);
+        consumeLLMEligibility(messageId);
         return legacySelections;
     }
 
@@ -1705,6 +1782,7 @@ async function pickEntriesForMessage(messageId, allowMultiple = false) {
         const alreadyIncluded = legacySelections.some(item => (item.entry.id || item.entry.name || item.entry.url) === (aiSelectedEntry.id || aiSelectedEntry.name || aiSelectedEntry.url));
         if (alreadyIncluded) {
             messagePlacementCache.set(cacheKey, legacySelections);
+            consumeLLMEligibility(messageId);
             return legacySelections;
         }
 
@@ -1712,6 +1790,7 @@ async function pickEntriesForMessage(messageId, allowMultiple = false) {
             .filter(Boolean)
             .slice(0, 2);
         messagePlacementCache.set(cacheKey, result);
+        consumeLLMEligibility(messageId);
         return result;
     }
 
@@ -1721,6 +1800,7 @@ async function pickEntriesForMessage(messageId, allowMultiple = false) {
 
     const result = [replacement];
     messagePlacementCache.set(cacheKey, result);
+    consumeLLMEligibility(messageId);
     return result;
 }
 
@@ -1966,7 +2046,7 @@ function renderList() {
         }
         entries = getUserEntries();
         storageKey = charKey;
-        
+
         if (!entries.length) {
             list.append($('<div class="image-embeds-empty">No user expressions added yet. Click + to add one.</div>'));
             return;
@@ -1979,7 +2059,7 @@ function renderList() {
         }
         entries = getCharacterEntries();
         storageKey = charKey;
-        
+
         if (!entries.length) {
             list.append($('<div class="image-embeds-empty">There are no expressions for this character yet. Click + to add one.</div>'));
             return;
@@ -2004,13 +2084,13 @@ function renderList() {
         remove.on('click', async () => {
             // Delete the physical file from server
             await deleteExpressionFile(entry.url);
-            
+
             // Remove from settings
             if (currentMode === 'user') {
-                extension_settings[SETTINGS_KEY].characters[storageKey].userEntries = 
+                extension_settings[SETTINGS_KEY].characters[storageKey].userEntries =
                     getUserEntries().filter(x => x.id !== entry.id);
             } else {
-                extension_settings[SETTINGS_KEY].characters[storageKey].entries = 
+                extension_settings[SETTINGS_KEY].characters[storageKey].entries =
                     getCharacterEntries().filter(x => x.id !== entry.id);
             }
             clearAiExpressionCache();
@@ -2058,9 +2138,9 @@ async function deleteExpressionFile(url) {
 
 async function addExpressionFromFile(file) {
     if (!file) return;
-    
+
     let charKey = getCharacterKey();
-    
+
     if (!charKey) {
         toastr.warning('Open a character chat to manage Image Embeds.', 'Image Embeds');
         return;
@@ -2093,7 +2173,7 @@ async function addExpressionFromFile(file) {
 
         const defaultName = ensureUniqueName((file.name || 'expression').replace(/\.[^.]+$/, ''));
         const settings = ensureSettings();
-        
+
         if (currentMode === 'user') {
             settings.characters[charKey].userEntries.push({
                 id: createId(),
@@ -2172,6 +2252,47 @@ function refreshAllMessages() {
             observer.observe(mes);
         });
     }, 80);
+}
+
+async function regenerateCurrentCharacterExpressions() {
+    const charKey = getCharacterKey();
+    if (!charKey) {
+        toastr.warning('Open a character chat first.', 'Image Embeds');
+        return;
+    }
+
+    const entries = getCurrentCardExpressionEntries();
+    if (!entries.length) {
+        toastr.warning('No expressions found for this character card.', 'Image Embeds');
+        return;
+    }
+
+    clearAiExpressionCache();
+    processedMessageGeneration++;
+    autoInjectInFlight.clear();
+    llmEligibleMessageIds.clear();
+
+    const messageRoots = Array.from(document.querySelectorAll('#chat .mes'))
+        .map(mes => ({
+            messageId: Number(mes.getAttribute('mesid')),
+            root: mes.querySelector('.mes_text'),
+        }))
+        .filter(item => item.root && !Number.isNaN(item.messageId));
+
+    for (const { root } of messageRoots) {
+        processedMessages.delete(root);
+        removeExpressionPlaceholdersForEntries(root, entries);
+    }
+
+    toastr.info('Old expressions cleared. Regenerating in 2 seconds...', 'Image Embeds');
+    await delay(2000);
+
+    for (const { root, messageId } of messageRoots) {
+        renderPlaceholders(root);
+        await autoInjectAfterGeneration(root, messageId);
+    }
+
+    toastr.success('Expressions regenerated for the current character card.', 'Image Embeds');
 }
 
 function onMessageRendered(messageId) {
@@ -2301,7 +2422,7 @@ function bindUi() {
         saveSettingsDebounced();
     });
 
-    $('#image_embeds_double_enabled').on('change', async (event) => {
+    $('#image_embeds_double_enabled').on('change', (event) => {
         const settings = ensureSettings();
         const previousValue = !!settings.doubleEnabled;
         const nextValue = !!event.target.checked;
@@ -2314,15 +2435,15 @@ function bindUi() {
 
         settings.doubleEnabled = nextValue;
         clearAiExpressionCache();
-        await saveSettings();
-        window.location.reload();
+        saveSettingsDebounced();
+        setTimeout(() => window.location.reload(), 750);
     });
 
     $('#image_embeds_advanced_enabled').on('change', (event) => {
         ensureSettings().advancedExpressionsEnabled = !!event.target.checked;
         clearAiExpressionCache();
         saveSettingsDebounced();
-        
+
         // Show/hide advanced settings section
         if (event.target.checked) {
             $('#image_embeds_advanced_settings').show();
@@ -2446,7 +2567,7 @@ function bindUi() {
     $('#image_embeds_user_enabled').on('change', (event) => {
         ensureSettings().showUserMode = !!event.target.checked;
         saveSettingsDebounced();
-        
+
         // Show/hide user mode button
         if (event.target.checked) {
             $('#image_embeds_mode_user').css('display', 'inline-block');
@@ -2461,6 +2582,35 @@ function bindUi() {
             }
         }
         renderList();
+    });
+
+    $('#image_embeds_regenerate_current').on('click', async () => {
+        const button = $('#image_embeds_regenerate_current');
+        button.prop('disabled', true);
+        try {
+            await regenerateCurrentCharacterExpressions();
+        } finally {
+            button.prop('disabled', false);
+        }
+    });
+
+    $('#image_embeds_expression_docs').on('click', () => {
+        const popup = $('#image_embeds_expression_docs_popup');
+        if (popup.hasClass('is-open')) {
+            closeExpressionDocumentation();
+        } else {
+            openExpressionDocumentation();
+        }
+    });
+
+    $('#image_embeds_expression_docs_close').on('click', () => {
+        closeExpressionDocumentation();
+    });
+
+    $('#image_embeds_expression_docs_popup').on('click', (event) => {
+        if (event.target === event.currentTarget) {
+            closeExpressionDocumentation();
+        }
     });
 
     $('#image_embeds_mode_char').on('click', () => {
@@ -2507,7 +2657,7 @@ async function injectSettingsUi() {
         const abortBtn = $('<button type="button" id="image_embeds_abort_test" class="menu_button" title="Abort the connection restart" style="display:none; margin-left:6px;"><i class="fa-solid fa-ban"></i> Abort Restart</button>');
         $('#image_embeds_test_connection').after(abortBtn);
     }
-    
+
     // Load saved API settings
     $('#image_embeds_custom_baseurl').val(settings.customBaseUrl || '');
     $('#image_embeds_api_key').val(settings.apiKey || '');
@@ -2531,6 +2681,8 @@ async function injectSettingsUi() {
         $('#image_embeds_mode_user').css('display', 'none');
         currentMode = 'character';
     }
+
+    renderExpressionDocumentation();
 }
 
 function bindEvents() {
@@ -2541,6 +2693,7 @@ function bindEvents() {
     eventSource.on(event_types.MORE_MESSAGES_LOADED, () => refreshAllMessages());
     eventSource.on(event_types.CHAT_CHANGED, () => {
         lastAssistantMessageId = null;
+        llmEligibleMessageIds.clear();
         renderList();
         refreshAllMessages();
     });
@@ -2548,6 +2701,7 @@ function bindEvents() {
     const renderActiveAssistantMessage = () => {
         const targetId = getActiveAssistantMessageId();
         if (targetId !== null && targetId !== undefined) {
+            markMessageEligibleForLLM(targetId);
             scheduleMessageRender(targetId);
         }
     };
