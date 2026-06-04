@@ -149,9 +149,9 @@
 
 .image-embeds-doc-card-header {
     display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    align-items: baseline;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
     min-width: 0;
 }
 
@@ -168,6 +168,7 @@
     white-space: nowrap;
     color: inherit;
     flex: 0 0 auto;
+    line-height: 1.1;
 }
 
 .image-embeds-doc-hints {
@@ -218,7 +219,6 @@
 
     .image-embeds-doc-card-header {
         align-items: flex-start;
-        flex-direction: column;
     }
 }
 

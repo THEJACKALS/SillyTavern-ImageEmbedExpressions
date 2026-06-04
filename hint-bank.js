@@ -17,7 +17,9 @@ export const EXPRESSION_HINTS = {
     amusement: [
         'amused', 'amusement', 'chuckled', 'chuckling', 'laughed softly', 'laughing softly',
         'snickered', 'snickering', 'giggle', 'giggled', 'giggling', 'playful smile',
-        'teasing smile', 'smirked', 'smirking', 'grinned',
+        'teasing smile', 'smirked', 'smirking', 'grinned', 'threw her head back laughing',
+        'threw his head back laughing', 'huhu', 'huhu~', 'complained playfully',
+        'mischievous', 'mischievously', 'grinned mischievously', 'greedy i like it',
     ],
     anger: [
         'angry', 'anger', 'furious', 'rage', 'glared', 'glaring', 'snapped at', 'snarled',
@@ -46,11 +48,13 @@ export const EXPRESSION_HINTS = {
         'did not understand', 'does not understand', 'lost', 'processed this information carefully',
         'are you serious', 'do you think', 'what do you think', 'genuine uncertainty',
         'expression showed genuine uncertainty', 'unless you are saying', "unless you're saying",
+        'when did this happen', 'gaze flicked between them', 'flicked between them',
+        'confusion flickering', 'something else flickering',
     ],
     curiosity: [
         'curious', 'curiosity', 'intrigued', 'interested', 'leaned in', 'leans in',
         'raised an eyebrow', 'arched an eyebrow', 'tell me more', 'questioning look',
-        'inquisitive', 'studied you',
+        'inquisitive', 'studied you', 'ara', 'ara~',
     ],
     desire: [
         'desire', 'desired', 'want', 'wanted', 'longing', 'yearning', 'hungry gaze',
@@ -108,7 +112,8 @@ export const EXPRESSION_HINTS = {
         'state of undress', 'towels barely covering', 'sitting intimately close',
         'take a shower together', 'took a shower together',
         'blushed deeply', 'cheeks flushed', 'stammered', 'r ryo', 'cut herself off',
-        'cut himself off', 'crossed lines',
+        'cut himself off', 'crossed lines', 'sputtered', 'taking a step back',
+        'took a step back', 'n-no comparison', 'oversized sweater',
     ],
     excitement: [
         'excited', 'excitement', 'thrilled', 'eager', 'bounced', 'bouncing', 'eyes sparkling',
@@ -118,12 +123,12 @@ export const EXPRESSION_HINTS = {
     fear: [
         'afraid', 'fear', 'fearful', 'scared', 'terrified', 'frightened', 'pale',
         'wide eyed', 'wide-eyed', 'froze', 'frozen', 'trembled', 'backed away',
-        'panic', 'panicked', 'horrified',
+        'panic', 'panicked', 'horrified', 'turned pale', 'turn pale', 'turnpale',
     ],
     gratitude: [
         'grateful', 'gratitude', 'thank you', 'thanks', 'thankful', 'appreciate it',
         'appreciated', 'relieved smile', 'soft thankful smile', 'bowed her head',
-        'bowed his head',
+        'bowed his head', 'thank you for this', 'for trusting me',
     ],
     grief: [
         'grief', 'grieving', 'mourning', 'mournful', 'sobbed', 'sobbing', 'wept',
@@ -132,7 +137,7 @@ export const EXPRESSION_HINTS = {
     joy: [
         'happy', 'happiness', 'joy', 'joyful', 'delighted', 'beamed', 'beaming',
         'grinned', 'grinning', 'laughed', 'laughing', 'cheerful', 'radiant smile',
-        'smiled brightly',
+        'smiled brightly', 'squealed', 'squeaked with surprise',
     ],
     love: [
         'love', 'loving', 'affection', 'affectionate', 'soft smile', 'warm smile',
@@ -178,16 +183,22 @@ export const EXPRESSION_HINTS = {
     neutral: [
         'neutral', 'calm', 'blank expression', 'blank face', 'expressionless', 'deadpan',
         'flat tone', 'even tone', 'matter of fact', 'matter-of-fact', 'composed',
-        'unreadable', 'stoic',
+        'unreadable', 'stoic', 'waited listening', 'listening to footsteps',
     ],
     optimism: [
         'optimistic', 'optimism', 'hopeful', 'hope', 'confident smile', 'encouraging smile',
         'it will be okay', 'we can do this', 'bright side', 'positive', 'reassuring',
     ],
     pride: [
-        'proud', 'pride', 'smug', 'smugly', 'puffed her chest', 'puffed his chest',
-        'chin lifted', 'satisfied grin', 'self satisfied', 'self-satisfied', 'boasted',
-        'boasting',
+        'proud', 'pride', 'puffed her chest', 'puffed his chest',
+        'chin lifted', 'boasted',
+        'boasting', 'satisfied', 'absolutely perfect', 'make it count',
+    ],
+    smug: [
+        'smug', 'smugly', 'smug smile', 'smug grin', 'smirked knowingly',
+        'knowing smirk', 'self satisfied', 'self-satisfied', 'satisfied grin',
+        'satisfied smirk', 'gave a smug look', 'looked smug',
+        'pleased with herself', 'pleased with himself',
     ],
     realization: [
         'realized', 'realization', 'dawned on her', 'dawned on him', 'it clicked',
@@ -197,6 +208,7 @@ export const EXPRESSION_HINTS = {
     relief: [
         'relieved', 'relief', 'sighed in relief', 'let out a breath', 'breathed out',
         'thank goodness', 'shoulders relaxed', 'tension left', 'safe now',
+        'catch her breath', 'catch his breath',
     ],
     remorse: [
         'remorse', 'remorseful', 'sorry', 'apologized', 'apologetic', 'guilt', 'guilty',
@@ -214,7 +226,13 @@ export const EXPRESSION_HINTS = {
         'wide eyes', 'eyes widened to', 'comical degree', 'freeze', 'froze up',
         'frozen up', 'brain officially went offline', 'short-circuited', 'could not do anything except stare',
         'jaw dropped', 'two whole bottles', 'no wonder you do not remember',
-        "no wonder you don't remember",
+        "no wonder you don't remember", 'appeared in the doorway', 'what the',
+        'froze in the doorway', 'purple eyes widening',
+    ],
+    wink: [
+        'wink', 'winked', 'winking', 'gave a wink', 'playful wink',
+        'teasing wink', 'mischievous wink', 'one eye closed',
+        'closed one eye', 'winked teasingly', 'winked playfully',
     ],
     agitation: [
         'agitation', 'agitated', 'restless', 'paced', 'pacing', 'irritated',
@@ -226,6 +244,13 @@ export const EXPRESSION_HINTS = {
         'dominant', 'commanding', 'commanded', 'ordered', 'authoritative', 'authority',
         'took control', 'in control', 'firm voice', 'stern command', 'held your chin',
         'pinned you', 'towered over', 'uncompromising stare',
+    ],
+    awkward: [
+        'awkward', 'awkwardly', 'awkward silence', 'awkward pause',
+        'uncomfortable silence', 'uncomfortable pause', 'shifted awkwardly',
+        'laughed awkwardly', 'awkward laugh', 'awkward smile', 'forced awkward smile',
+        'followed willingly', 'hesitated awkwardly', 'not sure what to say',
+        'did not know what to say', 'unsure what to say',
     ],
     flustered: [
         'flustered', 'stammered', 'stammering', 'stuttered', 'stuttering', 'spluttered',
@@ -240,6 +265,9 @@ export const EXPRESSION_HINTS = {
         'using them as a barrier', 'using it as a barrier', 'definitely shutting up',
         'breathless', 'breathless voice', 'shut up now', 'definitely shutting up',
         'shaky breath', 'nervous energy', 'talking faster now', 'rambling again',
+        'h-ah', 'mid-reach', 'protectively against her chest',
+        'protectively against his chest', 'holding them protectively',
+        'held them protectively',
     ],
     frustration: [
         'frustration', 'frustrated', 'frustrations', 'frustations', 'frustrating',
@@ -255,6 +283,7 @@ export const EXPRESSION_HINTS = {
         'dripping wet', 'still-hard', 'still hard', 'pressing against your',
         'pressed against your', 'my turn', 'hardness', 'joining us', 'naked',
         'bare breasts', 'ground against', 'pressed closer', 'hungry eyes',
+        'ready for round', 'lost count', 'bathroom fun',
     ],
     possessive: [
         'possessive', 'posessive', 'possessiveness', 'mine', 'you are mine',
@@ -284,6 +313,7 @@ export const EXPRESSION_HINTS = {
         'admitted quietly', 'fingers fidgeted', 'fidgeted', 'met his gaze',
         'met her gaze', 'vulnerability was clear', 'because i do very much',
         'soft almost hurt', 'voice was soft', 'genuine uncertainty',
+        'stepped closer', 'just us', 'trusting me',
     ],
 };
 
@@ -337,6 +367,7 @@ export const EXPRESSION_ALIASES = {
     uncertainty: 'confusion',
     uncertain: 'confusion',
     curious: 'curiosity',
+    ara: 'curiosity',
     desire: 'desire',
     wanting: 'desire',
     aroused: 'arousal',
@@ -350,6 +381,8 @@ export const EXPRESSION_ALIASES = {
     optimistic: 'optimism',
     hopeful: 'optimism',
     proud: 'pride',
+    smug: 'smug',
+    satisfied: 'pride',
     realized: 'realization',
     relieved: 'relief',
     dominant: 'dominant',
@@ -362,14 +395,21 @@ export const EXPRESSION_ALIASES = {
     lust: 'horny',
     lustful: 'horny',
     lewd: 'horny',
-    jealous: 'jealousy',
-    jealousy: 'jealousy',
+    jealous: 'jealous',
+    jealousy: 'jealous',
     possessive: 'possessive',
     posessive: 'possessive',
     suspicious: 'suspicious',
     suspicion: 'suspicious',
     vulnerable: 'vulnerable',
     vurnerable: 'vulnerable',
+    awkward: 'awkward',
+    worry: 'anxious',
+    worried: 'anxious',
+    huhu: 'amusement',
+    wink: 'wink',
+    turnpale: 'fear',
+    pale: 'fear',
 };
 
 export function getExpressionHintKeys(expressionName) {
@@ -392,17 +432,17 @@ export function getExpressionHintKeys(expressionName) {
 
     if (normalized.includes('fluster')) keys.add('flustered');
     if (normalized.includes('admir') || normalized.includes('impress')) keys.add('admiration');
-    if (normalized.includes('amus') || normalized.includes('playful') || normalized.includes('teas')) keys.add('amusement');
+    if (normalized.includes('amus') || normalized.includes('playful') || normalized.includes('teas') || normalized.includes('huhu')) keys.add('amusement');
     if (normalized.includes('embarrass') || normalized.includes('blush') || normalized.includes('shy')) keys.add('embarrassment');
     if (normalized.includes('excit') || normalized.includes('thrill') || normalized.includes('eager')) keys.add('excitement');
-    if (normalized.includes('anx')) keys.add('anxious');
+    if (normalized.includes('anx') || normalized.includes('worry')) keys.add('anxious');
     if (normalized.includes('nerv') || normalized.includes('anx')) keys.add('nervousness');
     if (normalized.includes('ang') || normalized.includes('mad') || normalized.includes('furious')) keys.add('anger');
     if (normalized.includes('annoy') || normalized.includes('exasperat')) keys.add('annoyance');
     if (normalized.includes('approv') || normalized.includes('pleased')) keys.add('approval');
     if (normalized.includes('caring') || normalized.includes('concern') || normalized.includes('comfort')) keys.add('caring');
     if (normalized.includes('confus') || normalized.includes('puzzl') || normalized.includes('uncertain')) keys.add('confusion');
-    if (normalized.includes('curio') || normalized.includes('intrigu')) keys.add('curiosity');
+    if (normalized.includes('curio') || normalized.includes('intrigu') || normalized.includes('ara')) keys.add('curiosity');
     if (normalized.includes('desire') || normalized.includes('want') || normalized.includes('longing')) keys.add('desire');
     if (normalized.includes('arous') || normalized.includes('heated') || normalized.includes('moan') || normalized.includes('gasp')) keys.add('arousal');
     if (normalized.includes('disappoint')) keys.add('disappointment');
@@ -414,20 +454,23 @@ export function getExpressionHintKeys(expressionName) {
     if (normalized.includes('agitat') || normalized.includes('irritat') || normalized.includes('restless')) keys.add('agitation');
     if (normalized.includes('neutral') || normalized.includes('blank') || normalized.includes('deadpan')) keys.add('neutral');
     if (normalized.includes('optim') || normalized.includes('hope')) keys.add('optimism');
-    if (normalized.includes('pride') || normalized.includes('proud') || normalized.includes('smug')) keys.add('pride');
+    if (normalized.includes('pride') || normalized.includes('proud') || normalized.includes('satisfied')) keys.add('pride');
+    if (normalized.includes('smug')) keys.add('smug');
     if (normalized.includes('realiz') || normalized.includes('realis') || normalized.includes('understand')) keys.add('realization');
     if (normalized.includes('relief') || normalized.includes('reliev')) keys.add('relief');
     if (normalized.includes('remorse') || normalized.includes('sorry') || normalized.includes('guilt') || normalized.includes('regret')) keys.add('remorse');
     if (normalized.includes('sad') || normalized.includes('cry') || normalized.includes('tear') || normalized.includes('hurt')) keys.add('sadness');
-    if (normalized.includes('fear') || normalized.includes('scared') || normalized.includes('afraid')) keys.add('fear');
+    if (normalized.includes('fear') || normalized.includes('scared') || normalized.includes('afraid') || normalized.includes('pale') || normalized.includes('turnpale')) keys.add('fear');
     if (normalized.includes('happy') || normalized.includes('joy') || normalized.includes('smile') || normalized.includes('laugh')) keys.add('joy');
     if (normalized.includes('surpris') || normalized.includes('shock') || normalized.includes('startl')) keys.add('surprise');
-    if (normalized.includes('jealous') || normalized.includes('envy') || normalized.includes('envious')) keys.add('jealousy');
+    if (normalized.includes('wink')) keys.add('wink');
+    if (normalized.includes('jealous') || normalized.includes('envy') || normalized.includes('envious')) keys.add('jealous');
     if (normalized.includes('domin') || normalized.includes('command')) keys.add('dominant');
     if (normalized.includes('frustrat') || normalized.includes('frustat')) keys.add('frustration');
     if (normalized.includes('horny') || normalized.includes('lust') || normalized.includes('lewd')) keys.add('horny');
     if (normalized.includes('possess') || normalized.includes('posess')) keys.add('possessive');
     if (normalized.includes('suspic') || normalized.includes('distrust') || normalized.includes('skeptic') || normalized.includes('wary')) keys.add('suspicious');
+    if (normalized.includes('awkward')) keys.add('awkward');
     if (normalized.includes('vulner') || normalized.includes('vurner') || normalized.includes('unguarded') || normalized.includes('uncertain')) keys.add('vulnerable');
 
     return [...keys];
