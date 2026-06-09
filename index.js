@@ -30,7 +30,9 @@ const EXTENSION_ID = (() => {
     return isThirdParty ? 'third-party/image-embeds-expressions' : 'image-embeds-expressions';
 })();
 const SETTINGS_KEY = 'imageEmbedsExpressions';
+const EXPRESSION_DOCS_POSITION_KEY = `${SETTINGS_KEY}_docsPosition`;
 const STORAGE_FOLDER = 'image-embeds-expressions';
+const NO_SPRITE_IMAGE_URL = new URL('./Assets/NoSprite.png', import.meta.url).href;
 const PLACEHOLDER_REGEX = /\{\{img::(.*?)\}\}/gi;
 const CODE_TAGS = new Set(['code', 'pre', 'samp', 'kbd']);
 const defaultSettings = {
@@ -38,12 +40,14 @@ const defaultSettings = {
     enabled: true,
     doubleEnabled: false,
     showUserMode: true,
+    noSpriteEnabled: true,
     advancedExpressionsEnabled: false,
     apiProvider: '',
     apiKey: '',
     apiModel: '',
     customBaseUrl: '',
-    autoConnectLastServer: false
+    autoConnectLastServer: false,
+    catalogSort: 'name_asc',
 };
 const DEFAULT_CHARACTER_GROUP = '__default__';
 let lastAssistantMessageId = null;
@@ -61,6 +65,11 @@ const LEADING_CHARACTER_ACTIONS = [
     'shook', 'turns', 'turned', 'tapped', 'waves', 'waved', 'gestured', 'gestures',
     'paused', 'pauses', 'leaned', 'leans', 'stepped', 'steps', 'walked', 'walks',
     'sat', 'sits', 'stood', 'stands', 'crossed', 'uncrossed', 'clenched', 'relaxed',
+    'purred', 'purrs', 'hummed', 'hums', 'swished', 'swishes', 'folded', 'folds',
+    'gleamed', 'gleams', 'scraped', 'scrapes', 'pulsed', 'pulses', 'doubled', 'doubles',
+    'slid', 'slides', 'marveled', 'marvels', 'teased', 'teases', 'protested', 'protests',
+    'collapsed', 'collapses', 'convulsed', 'convulses', 'stuttered', 'stutters',
+    'surged', 'surges', 'curled', 'curls', 'wrapped', 'wraps',
 ];
 
 let modelFetchToken = 0;
@@ -226,6 +235,90 @@ function renderExpressionDocumentation() {
     }
 }
 
+function getClampedDocsPosition(left, top, panel) {
+    const rect = panel.getBoundingClientRect();
+    const margin = 8;
+    const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+
+    return {
+        left: Math.min(Math.max(left, margin), maxLeft),
+        top: Math.min(Math.max(top, margin), maxTop),
+    };
+}
+
+function applyExpressionDocsPosition() {
+    const panel = $('#image_embeds_expression_docs_popup .image-embeds-docs-panel').get(0);
+    if (!panel) return;
+
+    let savedPosition = null;
+    try {
+        savedPosition = JSON.parse(localStorage.getItem(EXPRESSION_DOCS_POSITION_KEY) || 'null');
+    } catch {
+        savedPosition = null;
+    }
+
+    if (!savedPosition || typeof savedPosition.left !== 'number' || typeof savedPosition.top !== 'number') {
+        panel.style.top = '';
+        panel.style.left = '';
+        panel.style.transform = '';
+        return;
+    }
+
+    panel.style.transform = 'none';
+    const position = getClampedDocsPosition(savedPosition.left, savedPosition.top, panel);
+    panel.style.left = `${position.left}px`;
+    panel.style.top = `${position.top}px`;
+}
+
+function bindExpressionDocsDrag() {
+    const panel = $('#image_embeds_expression_docs_popup .image-embeds-docs-panel').get(0);
+    const header = $('#image_embeds_expression_docs_popup .image-embeds-docs-header').get(0);
+    if (!panel || !header || panel.dataset.dragBound === 'true') return;
+
+    panel.dataset.dragBound = 'true';
+
+    header.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0 || event.target.closest('button, input, select, textarea, a')) {
+            return;
+        }
+
+        const rect = panel.getBoundingClientRect();
+        const offsetX = event.clientX - rect.left;
+        const offsetY = event.clientY - rect.top;
+
+        panel.style.transform = 'none';
+        panel.style.left = `${rect.left}px`;
+        panel.style.top = `${rect.top}px`;
+        panel.classList.add('is-dragging');
+        header.setPointerCapture(event.pointerId);
+        event.preventDefault();
+
+        const movePanel = (moveEvent) => {
+            const position = getClampedDocsPosition(moveEvent.clientX - offsetX, moveEvent.clientY - offsetY, panel);
+            panel.style.left = `${position.left}px`;
+            panel.style.top = `${position.top}px`;
+        };
+
+        const stopDrag = () => {
+            panel.classList.remove('is-dragging');
+            header.removeEventListener('pointermove', movePanel);
+            header.removeEventListener('pointerup', stopDrag);
+            header.removeEventListener('pointercancel', stopDrag);
+
+            const finalRect = panel.getBoundingClientRect();
+            localStorage.setItem(EXPRESSION_DOCS_POSITION_KEY, JSON.stringify({
+                left: finalRect.left,
+                top: finalRect.top,
+            }));
+        };
+
+        header.addEventListener('pointermove', movePanel);
+        header.addEventListener('pointerup', stopDrag);
+        header.addEventListener('pointercancel', stopDrag);
+    });
+}
+
 function openExpressionDocumentation() {
     renderExpressionDocumentation();
     $('#image_embeds_expression_docs_popup')
@@ -233,6 +326,8 @@ function openExpressionDocumentation() {
         .addClass('is-open')
         .attr('aria-hidden', 'false')
         .css('display', 'flex');
+    bindExpressionDocsDrag();
+    applyExpressionDocsPosition();
 }
 
 function closeExpressionDocumentation() {
@@ -368,6 +463,31 @@ function consumeLLMEligibility(messageId) {
     }
 }
 
+function migrateVulnerableEntryNames(settings) {
+    let changed = false;
+    const vulnerableTypo = 'vurn' + 'erable';
+    const normalizeTypo = value => {
+        if (typeof value !== 'string' || !value.includes(vulnerableTypo)) {
+            return value;
+        }
+        changed = true;
+        return value.replaceAll(vulnerableTypo, 'vulnerable');
+    };
+
+    for (const characterSettings of Object.values(settings.characters || {})) {
+        for (const key of ['entries', 'userEntries']) {
+            if (!Array.isArray(characterSettings?.[key])) continue;
+
+            for (const entry of characterSettings[key]) {
+                entry.name = normalizeTypo(entry.name);
+                entry.originalName = normalizeTypo(entry.originalName);
+            }
+        }
+    }
+
+    return changed;
+}
+
 function ensureSettings() {
     if (!extension_settings[SETTINGS_KEY] || typeof extension_settings[SETTINGS_KEY] !== 'object') {
         extension_settings[SETTINGS_KEY] = { ...defaultSettings, characters: {} };
@@ -387,6 +507,10 @@ function ensureSettings() {
 
     if (typeof extension_settings[SETTINGS_KEY].showUserMode !== 'boolean') {
         extension_settings[SETTINGS_KEY].showUserMode = true;
+    }
+
+    if (typeof extension_settings[SETTINGS_KEY].noSpriteEnabled !== 'boolean') {
+        extension_settings[SETTINGS_KEY].noSpriteEnabled = true;
     }
 
     if (typeof extension_settings[SETTINGS_KEY].advancedExpressionsEnabled !== 'boolean') {
@@ -411,6 +535,14 @@ function ensureSettings() {
 
     if (typeof extension_settings[SETTINGS_KEY].autoConnectLastServer !== 'boolean') {
         extension_settings[SETTINGS_KEY].autoConnectLastServer = false;
+    }
+
+    if (!['name_asc', 'name_desc', 'newest', 'oldest'].includes(extension_settings[SETTINGS_KEY].catalogSort)) {
+        extension_settings[SETTINGS_KEY].catalogSort = 'name_asc';
+    }
+
+    if (migrateVulnerableEntryNames(extension_settings[SETTINGS_KEY])) {
+        saveSettingsDebounced();
     }
 
     return extension_settings[SETTINGS_KEY];
@@ -488,6 +620,10 @@ function normalizeName(name) {
 function findEntryByName(name) {
     const target = normalizeName(name);
 
+    if (ensureSettings().noSpriteEnabled && target.startsWith('nosprite_')) {
+        return buildNoSpriteEntry(target.replace(/^nosprite_/, ''));
+    }
+
     // Search character entries first
     let entry = getCharacterEntries().find(entry => normalizeName(entry.name) === target);
     if (entry) return entry;
@@ -497,6 +633,21 @@ function findEntryByName(name) {
         entry = getUserEntries().find(entry => normalizeName(entry.name) === target);
     }
     return entry || null;
+}
+
+function buildNoSpriteEntry(expressionName) {
+    if (!ensureSettings().noSpriteEnabled) {
+        return null;
+    }
+
+    const expression = normalizeName(expressionName || 'unknown') || 'unknown';
+
+    return {
+        id: `nosprite:${expression}`,
+        name: `NoSprite_${expression}`,
+        url: NO_SPRITE_IMAGE_URL,
+        isNoSprite: true,
+    };
 }
 
 function parseEntryName(name) {
@@ -768,7 +919,8 @@ function buildRecentInteractionContext(messageId, characterKeys, windowSize = 4)
 function scoreCharacters(text, characters) {
     const lowerText = String(text || '').toLowerCase();
     const cleaned = lowerText.replace(/[^\w\s]/g, ' ');
-    const presenceVerbs = ['said', 'says', 'ask', 'asked', 'asks', 'reply', 'replied', 'replies', 'respond', 'responded', 'responds', 'yell', 'yelled', 'yells', 'shout', 'shouted', 'shouts', 'whisper', 'whispered', 'whispers', 'mutter', 'muttered', 'mutters', 'laughed', 'laughs', 'laughing', 'smiled', 'smiles', 'smiling', 'nodded', 'nods', 'grinned', 'grins', 'grinning', 'looked', 'looks', 'looking', 'turned', 'turns', 'walk', 'walking', 'walked', 'walks', 'stood', 'stands', 'standing', 'sat', 'sits', 'sitting', 'hitched', 'shivered', 'giggled', 'smirked', 'melted', 'rested', 'traced', 'dried', 'watched', 'climbed', 'ground', 'grabbed', 'come', 'comes', 'came', 'arrive', 'arrives', 'arrived', 'blushed', 'cried', 'stared'];
+    const presenceVerbs = ['said', 'says', 'ask', 'asked', 'asks', 'reply', 'replied', 'replies', 'respond', 'responded', 'responds', 'yell', 'yelled', 'yells', 'shout', 'shouted', 'shouts', 'whisper', 'whispered', 'whispers', 'mutter', 'muttered', 'mutters', 'laughed', 'laughs', 'laughing', 'smiled', 'smiles', 'smiling', 'nodded', 'nods', 'grinned', 'grins', 'grinning', 'looked', 'looks', 'looking', 'turned', 'turns', 'walk', 'walking', 'walked', 'walks', 'stood', 'stands', 'standing', 'sat', 'sits', 'sitting', 'hitched', 'shivered', 'giggled', 'smirked', 'melted', 'rested', 'traced', 'dried', 'watched', 'climbed', 'ground', 'grabbed', 'come', 'comes', 'came', 'arrive', 'arrives', 'arrived', 'blushed', 'cried', 'stared', 'purred', 'hummed', 'swished', 'folded', 'gleamed', 'scraped', 'pulsed', 'doubled', 'slid', 'marveled', 'teased', 'protested', 'collapsed', 'convulsed', 'stuttered', 'surged', 'curled', 'wrapped'];
+    const presenceNouns = ['laugh', 'blush', 'eyes', 'fangs', 'tail', 'magic', 'movements', 'movement', 'body', 'voice', 'breath', 'hips', 'technique', 'efforts', 'mouth', 'climax', 'nails', 'hands', 'ears'];
     const imaginationHints = ['memory of', 'remembering', 'image of', 'imagination of', 'imagining', 'fantasy of', 'thinking of', 'thought of', 'dream of', 'dreaming of', 'idea of', 'vision of'];
     const results = [];
 
@@ -796,6 +948,9 @@ function scoreCharacters(text, characters) {
                 const window = lowerText.slice(Math.max(0, match.index - 24), match.index + plainName.length + 24);
                 if (presenceVerbs.some(v => new RegExp(`\\b${escapeRegExp(v)}\\b`).test(window))) {
                     score += aliasWeight;
+                }
+                if (presenceNouns.some(noun => new RegExp(`\\b${escapeRegExp(noun)}\\b`).test(window))) {
+                    score += aliasWeight * 0.75;
                 }
                 if (imaginationHints.some(h => window.includes(h))) {
                     score -= aliasWeight;
@@ -860,6 +1015,61 @@ function scoreExpressionFromText(messageText, availableEntries) {
     return best?.score > 0 ? best.entry : null;
 }
 
+function scoreDetectedExpressionKeys(messageText) {
+    const cleaned = normalizeHintText(String(messageText || '').toLowerCase());
+    const scores = [];
+
+    for (const [key, hints] of Object.entries(EXPRESSION_HINTS)) {
+        let score = 0;
+
+        if (key && new RegExp(`\\b${escapeRegExp(key)}\\b`, 'i').test(cleaned)) {
+            score += 4;
+        }
+
+        for (const hint of hints || []) {
+            const normalizedHint = normalizeHintText(hint);
+            if (normalizedHint && textIncludesNeedle(cleaned, normalizedHint)) {
+                score += hint.includes(' ') ? 2 : 1;
+            }
+        }
+
+        if (score > 0) {
+            scores.push({ key, score });
+        }
+    }
+
+    return scores.sort((left, right) => right.score - left.score);
+}
+
+function hasExactExpressionEntry(entries, expressionKey) {
+    const target = normalizeName(expressionKey);
+    if (!target) return false;
+
+    return (entries || []).some(entry => {
+        const expression = normalizeName(parseEntryName(entry.name).expression);
+        return expression === target;
+    });
+}
+
+function findNoSpriteEntryForDetectedExpression(messageText, entries) {
+    const detected = scoreDetectedExpressionKeys(messageText)[0];
+    if (!detected) return null;
+
+    return hasExactExpressionEntry(entries, detected.key)
+        ? null
+        : buildNoSpriteEntry(detected.key);
+}
+
+function buildNoSpritePlacementForMessage(messageText, characterKey = DEFAULT_CHARACTER_GROUP, dominance = null) {
+    const detected = scoreDetectedExpressionKeys(messageText)[0];
+    if (!detected) return null;
+
+    const character = normalizeName(characterKey || DEFAULT_CHARACTER_GROUP);
+    const safeDominance = dominance || { blocksByCharacter: new Map() };
+    const entry = buildNoSpriteEntry(detected.key);
+    return entry ? buildPlacementForEntry(entry, character, safeDominance, character) : null;
+}
+
 function selectEntryForCharacter(groups, characterKey, messageText) {
     const entries = groups.get(characterKey) || [];
     if (!entries.length) return null;
@@ -875,6 +1085,11 @@ function selectEntryForCharacter(groups, characterKey, messageText) {
         if (needles.some(needle => textIncludesNeedle(cleaned, needle))) {
             return entry;
         }
+    }
+
+    const noSpriteEntry = findNoSpriteEntryForDetectedExpression(messageText, entries.map(item => item.entry));
+    if (noSpriteEntry) {
+        return noSpriteEntry;
     }
 
     const scoredEntry = scoreExpressionFromText(messageText, entries.map(item => item.entry));
@@ -1115,6 +1330,59 @@ function buildPlaceholder(name) {
     return `{{img::${name}}}`;
 }
 
+function getCatalogSortParts(entry) {
+    const parsed = parseEntryName(entry?.name);
+    return {
+        character: normalizeName(parsed.character || ''),
+        expression: normalizeName(parsed.expression || entry?.name || ''),
+    };
+}
+
+function getCatalogSortTime(entry, fallbackIndex) {
+    const explicitTime = Number(entry?.createdAt);
+    if (Number.isFinite(explicitTime)) return explicitTime;
+
+    const match = String(entry?.url || '').match(/\/(\d{10,})_/);
+    if (match) {
+        const urlTime = Number(match[1]);
+        if (Number.isFinite(urlTime)) return urlTime;
+    }
+
+    return fallbackIndex;
+}
+
+function sortCatalogEntries(entries) {
+    const settings = ensureSettings();
+    const sortMode = settings.catalogSort || 'name_asc';
+    const indexedEntries = (entries || []).map((entry, index) => ({ entry, index }));
+
+    indexedEntries.sort((left, right) => {
+        if (sortMode === 'newest' || sortMode === 'oldest') {
+            const leftTime = getCatalogSortTime(left.entry, left.index);
+            const rightTime = getCatalogSortTime(right.entry, right.index);
+            if (leftTime !== rightTime) {
+                return sortMode === 'newest' ? rightTime - leftTime : leftTime - rightTime;
+            }
+        } else {
+            const leftParts = getCatalogSortParts(left.entry);
+            const rightParts = getCatalogSortParts(right.entry);
+            const characterComparison = leftParts.character.localeCompare(rightParts.character, undefined, { numeric: true, sensitivity: 'base' });
+            if (characterComparison !== 0) {
+                return sortMode === 'name_desc' ? -characterComparison : characterComparison;
+            }
+
+            const expressionComparison = leftParts.expression.localeCompare(rightParts.expression, undefined, { numeric: true, sensitivity: 'base' });
+            if (expressionComparison !== 0) {
+                return sortMode === 'name_desc' ? -expressionComparison : expressionComparison;
+            }
+        }
+
+        return left.index - right.index;
+    });
+
+    return indexedEntries.map(item => item.entry);
+}
+
 function createId() {
     return crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -1309,6 +1577,10 @@ function buildPlacementForEntry(entry, character, dominance, targetCharacter = c
 }
 
 function getPlacementCharacterKey(placement) {
+    if (placement?.entry?.isNoSprite) {
+        return normalizeName(placement?.targetCharacter || placement?.character || DEFAULT_CHARACTER_GROUP);
+    }
+
     const parsedCharacter = parseEntryName(placement?.entry?.name).character;
     const key = parsedCharacter || placement?.targetCharacter || placement?.character || DEFAULT_CHARACTER_GROUP;
     return normalizeName(key || DEFAULT_CHARACTER_GROUP);
@@ -1474,24 +1746,29 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
     const entries = activeCardEntries.length
         ? activeCardEntries
         : getCrossPackEntriesForMessage(messageTextRaw);
-    if (!entries.length) return [];
 
     const settings = ensureSettings();
     const messageText = messageTextRaw.toLowerCase();
+    const activeCharacterKey = getActiveCharacterExpressionKey();
+
+    if (!entries.length) {
+        const noSpritePlacement = buildNoSpritePlacementForMessage(messageTextRaw, activeCharacterKey || DEFAULT_CHARACTER_GROUP);
+        return noSpritePlacement ? [noSpritePlacement] : [];
+    }
+
     const grouped = groupEntriesByCharacter(entries);
     const characterKeys = Array.from(grouped.keys()).filter(key => key && key !== DEFAULT_CHARACTER_GROUP);
     const strictCharacterScopedEntries = hasStrictCharacterScopedEntries(entries);
     let activeMessageCharacterKeys = strictCharacterScopedEntries
         ? detectActiveCharacterKeys(messageTextRaw, characterKeys)
         : [];
-    if (usingCrossPackEntries && strictCharacterScopedEntries && !activeMessageCharacterKeys.length) {
+    if (strictCharacterScopedEntries && !activeMessageCharacterKeys.length) {
         activeMessageCharacterKeys = scoreCharacters(messageTextRaw, characterKeys)
             .filter(result => result.score > 0)
             .map(result => result.character);
     }
     const eligibleCharacterKeys = activeMessageCharacterKeys.length ? activeMessageCharacterKeys : characterKeys;
     const messageCharacterKey = resolveMessageCharacterKey(messageId, eligibleCharacterKeys);
-    const activeCharacterKey = getActiveCharacterExpressionKey();
     const recentContext = buildRecentInteractionContext(messageId, eligibleCharacterKeys);
     const characterScores = eligibleCharacterKeys.length ? scoreCharacters(messageText, eligibleCharacterKeys) : [];
     const dominance = analyzeParagraphDominance(messageTextRaw, eligibleCharacterKeys);
@@ -2066,6 +2343,8 @@ function renderList() {
         }
     }
 
+    entries = sortCatalogEntries(entries);
+
     for (const entry of entries) {
         const row = $('<div class="image-embeds-row"></div>');
         const preview = $('<img class="image-embeds-preview" loading="lazy" alt="Expression preview">').attr('src', entry.url || '');
@@ -2180,6 +2459,7 @@ async function addExpressionFromFile(file) {
                 name: defaultName,
                 url,
                 originalName: file.name || '',
+                createdAt: Date.now(),
             });
         } else {
             settings.characters[charKey].entries.push({
@@ -2187,6 +2467,7 @@ async function addExpressionFromFile(file) {
                 name: defaultName,
                 url,
                 originalName: file.name || '',
+                createdAt: Date.now(),
             });
         }
 
@@ -2584,6 +2865,19 @@ function bindUi() {
         renderList();
     });
 
+    $('#image_embeds_nosprite_enabled').on('change', (event) => {
+        ensureSettings().noSpriteEnabled = !!event.target.checked;
+        clearAiExpressionCache();
+        saveSettingsDebounced();
+        toastr.info('Refresh your browser for the NoSprite setting to fully apply.', 'Image Embeds');
+    });
+
+    $('#image_embeds_sort').on('change', (event) => {
+        ensureSettings().catalogSort = event.target.value;
+        saveSettingsDebounced();
+        renderList();
+    });
+
     $('#image_embeds_regenerate_current').on('click', async () => {
         const button = $('#image_embeds_regenerate_current');
         button.prop('disabled', true);
@@ -2605,12 +2899,6 @@ function bindUi() {
 
     $('#image_embeds_expression_docs_close').on('click', () => {
         closeExpressionDocumentation();
-    });
-
-    $('#image_embeds_expression_docs_popup').on('click', (event) => {
-        if (event.target === event.currentTarget) {
-            closeExpressionDocumentation();
-        }
     });
 
     $('#image_embeds_mode_char').on('click', () => {
@@ -2646,7 +2934,9 @@ async function injectSettingsUi() {
     $('#image_embeds_advanced_enabled').prop('checked', !!settings.advancedExpressionsEnabled);
     $('#image_embeds_double_enabled').prop('checked', !!settings.doubleEnabled);
     $('#image_embeds_user_enabled').prop('checked', !!settings.showUserMode);
+    $('#image_embeds_nosprite_enabled').prop('checked', !!settings.noSpriteEnabled);
     $('#image_embeds_auto_connect_last_server').prop('checked', !!settings.autoConnectLastServer);
+    $('#image_embeds_sort').val(settings.catalogSort || 'name_asc');
     renderConnectionStatus('disconnected', settings.apiProvider ? 'Disconnected' : 'Select a provider first');
 
     // Initialize API configuration

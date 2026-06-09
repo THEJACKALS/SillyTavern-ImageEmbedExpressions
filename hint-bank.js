@@ -13,6 +13,7 @@ export const EXPRESSION_HINTS = {
         'looked up to', 'respect', 'respected', 'in awe', 'awe', 'wonder in her eyes',
         'wonder in his eyes', 'starry eyed', 'starry-eyed', 'perfect', 'dangerously perfect',
         'heart-meltingly perfect', 'being considerate', 'genuine', 'present',
+        'admiring', 'observed', 'lucky for me', 'impressive control',
     ],
     amusement: [
         'amused', 'amusement', 'chuckled', 'chuckling', 'laughed softly', 'laughing softly',
@@ -20,6 +21,9 @@ export const EXPRESSION_HINTS = {
         'teasing smile', 'smirked', 'smirking', 'grinned', 'threw her head back laughing',
         'threw his head back laughing', 'huhu', 'huhu~', 'complained playfully',
         'mischievous', 'mischievously', 'grinned mischievously', 'greedy i like it',
+        'soft laugh', 'teased', 'teasing', 'playfully', 'wickedly', 'naughty yourself',
+        'complaints', 'how dare you suggest', 'but who is counting', "but who's counting",
+        'caught that did you', 'not exactly sleeping material',
     ],
     anger: [
         'angry', 'anger', 'furious', 'rage', 'glared', 'glaring', 'snapped at', 'snarled',
@@ -41,6 +45,9 @@ export const EXPRESSION_HINTS = {
         'softened her voice', 'softened his voice', 'comforting', 'comforted', 'soothing',
         'tended to', 'checked on you', 'protective', 'care about', 'do you care about',
         'hurt her feelings', 'hurt his feelings', 'hurt mixed with concern',
+        'shows you care', 'thank you for remembering', 'if you were safe', 'if you were hurt',
+        'i cannot let you suffer', "i can't let you suffer", 'not when i am responsible',
+        "not when i'm responsible", 'then i will help you finish', "then i'll help you finish",
     ],
     confusion: [
         'confused', 'confusion', 'puzzled', 'bewildered', 'tilted her head', 'tilted his head',
@@ -63,6 +70,14 @@ export const EXPRESSION_HINTS = {
         'kiss', 'kissed', 'melted into the kiss', 'against his lips', 'against her lips',
         'pressed closer', 'traced patterns', 'hungry eyes', 'appealing', 'tease me',
         'tease her', 'tease him', 'ground against', 'straddling', 'straddled', 'moan'
+        , 'needy', 'needily', 'missed you too much', 'years of waiting',
+        'i have waited too long', "i've waited too long", 'i deserve this',
+        'keep talking', 'tell me what you see', 'tell me what you like',
+        'what you want', 'what you need', 'love this love me',
+        'worship every inch', 'deserve to be worshipped',
+        'thick with desire', 'want to taste you again', 'taste you again',
+        'fill my mouth', 'let me swallow', 'very interested in sampling you',
+        'interested in sampling you',
     ],
     arousal: [
         'arousal', 'aroused', 'heated gaze', 'heat pooled', 'breath hitched',
@@ -76,12 +91,25 @@ export const EXPRESSION_HINTS = {
         'cried out', 'gasped', 'walls clenched', 'clenched around him', 'clenched around her',
         'fill me', 'filled me', 'fill me so completely', 'thrust deeper', 'harder please',
         'living room echoed with their moans', 'couch creaked',
+        'voice was husky', 'husky', 'breathless laugh', 'laugh was breathless',
+        'movements quickening', 'movements became more urgent', 'increasing urgency',
+        'body moving on yours', 'hips rolling', 'hips grinding', 'hips shifting',
+        'arched her back', 'arched his back', 'hit deeper', 'hitting deeper',
+        'body chasing release', 'climax hitting hard', 'body convulsed',
+        'body went taut', 'movements stuttering', 'breath ragged',
+        'body already responding', 'responding to your touch',
+        'muffled around you', 'good boy', 'purred', 'fangs scraping lightly',
+        'tail swished excitedly', 'warm and intimate', 'mouth working magic',
+        'working magic on your length', 'taking you in her mouth eagerly',
+        'already hard again', 'inner walls clamping down', 'magic pulsing',
     ],
     disappointment: [
         'disappointed', 'disappointment', 'let down', 'deflated', 'shoulders slumped',
         'sank', 'sighed sadly', 'lowered her gaze', 'lowered his gaze', 'not what i hoped',
         'expected better', 'almost hurt', 'voice was soft almost hurt', 'did not think to mention',
         "didn't think to mention", 'mention this earlier',
+        'hint of disappointment', 'do you dislike it', 'if you prefer', 'movements faltered',
+        'faltered slightly',
     ],
     disapproval: [
         'disapproved', 'disapproval', 'disapproving', 'stern look', 'frowned', 'frowning',
@@ -114,11 +142,19 @@ export const EXPRESSION_HINTS = {
         'blushed deeply', 'cheeks flushed', 'stammered', 'r ryo', 'cut herself off',
         'cut himself off', 'crossed lines', 'sputtered', 'taking a step back',
         'took a step back', 'n-no comparison', 'oversized sweater',
+        'blush deepened', 'blush spread', 'blush intensifying', 'glancing away',
+        'ears flattening', 'ears flattened', 'ears folding', 'bit her lip',
+        'bit his lip', 'clearly embarrassed', 'defensive but there was laughter',
+        'for research purposes', 'purely scientific', 'self-conscious',
+        'hands moved to her hair', 'hands moved to his hair', 'accepting graciously',
+        'ears folding', 'making me greedy', 'naughty yourself',
     ],
     excitement: [
         'excited', 'excitement', 'thrilled', 'eager', 'bounced', 'bouncing', 'eyes sparkling',
         'lit up', 'brightened', 'can not wait', "can't wait", 'energetic', 'enthusiastic',
         'thrilling', 'hurry up', 'want to see what happens',
+        'surprised delighted', 'laugh was surprised delighted', 'energetic playful',
+        'magic hummed around you both energetic playful', 'once more', 'just once more',
     ],
     fear: [
         'afraid', 'fear', 'fearful', 'scared', 'terrified', 'frightened', 'pale',
@@ -138,6 +174,10 @@ export const EXPRESSION_HINTS = {
         'happy', 'happiness', 'joy', 'joyful', 'delighted', 'beamed', 'beaming',
         'grinned', 'grinning', 'laughed', 'laughing', 'cheerful', 'radiant smile',
         'smiled brightly', 'squealed', 'squeaked with surprise',
+        'ears twitching happily', 'betraying her joy', 'betraying his joy',
+        'eyes bright', 'bright and warm', 'my kitty i like that',
+        'she liked that', 'he liked that',
+        'eyes gleaming with satisfaction', 'gleaming with satisfaction',
     ],
     love: [
         'love', 'loving', 'affection', 'affectionate', 'soft smile', 'warm smile',
@@ -151,6 +191,14 @@ export const EXPRESSION_HINTS = {
         'overwhelming feelings', 'casual touch', 'melted into the kiss',
         'rested her forehead against his', 'rested his forehead against her',
         'other people\'s hearts', 'other peoples hearts',
+        'missed you', 'missed you every single day', 'clung to you',
+        'pulled you down to lie beside her', 'pulled you down to lie beside him',
+        'body immediately curving into yours', 'murmured against your chest',
+        'curled into yours', 'nuzzled against your neck', 'nuzzled against your chest',
+        'breathing in your scent', 'listening to your heartbeat',
+        'tail curled around your leg affectionately', 'tail loves you too',
+        'my tail loves you too', 'you still love me anyway',
+        'do not make me wait so long', "don't make me wait so long",
     ],
     anxious: [
         'anxious', 'anxiety', 'anxiously', 'uneasy', 'uneasiness', 'worried',
@@ -162,7 +210,9 @@ export const EXPRESSION_HINTS = {
         'hands clenched anxiously', 'fingers twisting', 'trying not to be trouble',
         'too much trouble', 'afraid of being a burden', 'breathing rapidly',
         'clearly distressed', 'what did you think', 'should i throw it away',
-        'am i a terrible person',
+        'am i a terrible person', 'wondered if you were safe', 'wondered if you were hurt',
+        'if you had forgotten about me', "if you'd forgotten about me",
+        'i do not handle separation well', "i don't handle separation well",
     ],
     nervousness: [
         'nervous', 'nervousness', 'anxious', 'uneasy', 'tremor in her voice',
@@ -171,6 +221,7 @@ export const EXPRESSION_HINTS = {
         'hesitating', 'uncertain', 'worried', 'rapid breathing', 'breathing was rapid',
         'higher pitched than usual', 'voice was higher pitched', 'shaky breath',
         'could not breathe properly', 'mind was racing', 'nervous energy',
+        'breath catching', 'breath caught', 'cut herself off', 'cut himself off',
     ],
     jealous: [
         'jealous', 'jealousy', 'envy', 'envious', 'looked jealous', 'possessive glare',
@@ -179,6 +230,9 @@ export const EXPRESSION_HINTS = {
         'her gaze lingered', 'his gaze lingered', 'where she sat on', 'where he sat on',
         'hard seeing you two together', 'seeing you two together', 'force you to choose',
         'would not be fair', "wouldn't be fair", 'hope you want me too', 'want me too',
+        'if you ever tell', 'love her too', 'love him too', 'forget your own name',
+        'no one else gets to feel you', 'only one i have ever been like this with',
+        "only one i've ever been like this with",
     ],
     neutral: [
         'neutral', 'calm', 'blank expression', 'blank face', 'expressionless', 'deadpan',
@@ -193,6 +247,10 @@ export const EXPRESSION_HINTS = {
         'proud', 'pride', 'puffed her chest', 'puffed his chest',
         'chin lifted', 'boasted',
         'boasting', 'satisfied', 'absolutely perfect', 'make it count',
+        'satisfied possessive', 'all i need', 'stupid stubborn loyal',
+        'impressive control', 'making me greedy',
+        'satisfaction', 'with satisfaction', 'technique perfect',
+        'impressive control right',
     ],
     smug: [
         'smug', 'smugly', 'smug smile', 'smug grin', 'smirked knowingly',
@@ -208,7 +266,10 @@ export const EXPRESSION_HINTS = {
     relief: [
         'relieved', 'relief', 'sighed in relief', 'let out a breath', 'breathed out',
         'thank goodness', 'shoulders relaxed', 'tension left', 'safe now',
-        'catch her breath', 'catch his breath',
+        'catch her breath', 'catch his breath', 'watery with relief',
+        'body relaxing fully', 'relaxing fully against yours',
+        'half laugh half sob', 'half-laugh half-sob',
+        'obvious exhaustion', 'worn me out', 'need more than a moment',
     ],
     remorse: [
         'remorse', 'remorseful', 'sorry', 'apologized', 'apologetic', 'guilt', 'guilty',
@@ -289,6 +350,11 @@ export const EXPRESSION_HINTS = {
         'possessive', 'posessive', 'possessiveness', 'mine', 'you are mine',
         "you're mine", 'belongs to me', 'belong to me', 'claimed you', 'claiming you',
         'pulled you closer', 'kept you close', 'protective grip',
+        'all mine', 'this is mine', 'really mine', 'very possessive',
+        'possessive and needy', 'difficult and possessive', 'possessive about my human',
+        'tail curled around your leg possessively', 'tail wrapped around your leg',
+        'tail wrapped fully around both of you', 'claim you', 'enjoy seeing me claim you',
+        'what is mine is mine', "what's mine is mine", 'only me',
     ],
     suspicious: [
         'suspicious', 'suspicion', 'distrustful', 'distrust', 'narrowed her eyes',
@@ -300,7 +366,7 @@ export const EXPRESSION_HINTS = {
         'did you two', 'take a shower together', 'took a shower together',
     ],
     vulnerable: [
-        'vulnerable', 'vurnerable', 'vulnerability', 'unguarded', 'fragile',
+        'vulnerable', 'vulnerability', 'unguarded', 'fragile',
         'voice softened', 'voice small', 'small voice', 'looked away helplessly',
         'opened up', 'let her guard down', 'let his guard down', 'teary smile',
         'uncertain smile', 'voice came out smaller', 'smaller than intended',
@@ -314,6 +380,13 @@ export const EXPRESSION_HINTS = {
         'met her gaze', 'vulnerability was clear', 'because i do very much',
         'soft almost hurt', 'voice was soft', 'genuine uncertainty',
         'stepped closer', 'just us', 'trusting me',
+        'voice was earnest', 'earnest vulnerable', 'come back to me',
+        'come back that is all i need', "come back that's all i need",
+        'do not make me doubt again', 'never make me doubt again',
+        'weak exhausted', 'teased weakly', 'body still trembling',
+        'eyes searching yours', 'i might need more than a moment',
+        'laugh was weak exhausted', 'weak exhausted', 'voice was determined despite',
+        'determined despite her obvious exhaustion', 'determined despite his obvious exhaustion',
     ],
 };
 
@@ -402,7 +475,6 @@ export const EXPRESSION_ALIASES = {
     suspicious: 'suspicious',
     suspicion: 'suspicious',
     vulnerable: 'vulnerable',
-    vurnerable: 'vulnerable',
     awkward: 'awkward',
     worry: 'anxious',
     worried: 'anxious',
@@ -451,10 +523,12 @@ export function getExpressionHintKeys(expressionName) {
     if (normalized.includes('grat') || normalized.includes('thank')) keys.add('gratitude');
     if (normalized.includes('grief') || normalized.includes('mourn')) keys.add('grief');
     if (normalized.includes('affection') || normalized.includes('love') || normalized.includes('tender')) keys.add('love');
+    if (normalized.includes('affection')) keys.add('caring');
     if (normalized.includes('agitat') || normalized.includes('irritat') || normalized.includes('restless')) keys.add('agitation');
     if (normalized.includes('neutral') || normalized.includes('blank') || normalized.includes('deadpan')) keys.add('neutral');
     if (normalized.includes('optim') || normalized.includes('hope')) keys.add('optimism');
     if (normalized.includes('pride') || normalized.includes('proud') || normalized.includes('satisfied')) keys.add('pride');
+    if (normalized.includes('satisfied')) keys.add('relief');
     if (normalized.includes('smug')) keys.add('smug');
     if (normalized.includes('realiz') || normalized.includes('realis') || normalized.includes('understand')) keys.add('realization');
     if (normalized.includes('relief') || normalized.includes('reliev')) keys.add('relief');

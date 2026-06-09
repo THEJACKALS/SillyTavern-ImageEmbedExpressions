@@ -1,6 +1,24 @@
 .image-embeds-toolbar {
     gap: 8px;
     margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.image-embeds-sort-control {
+    align-items: center;
+    display: inline-flex;
+    gap: 6px;
+    margin-left: auto;
+    min-width: 112px;
+}
+
+.image-embeds-sort-control i {
+    opacity: 0.75;
+}
+
+.image-embeds-sort-control select {
+    min-width: 92px;
+    width: auto;
 }
 
 .image-embeds-list {
@@ -76,6 +94,7 @@
     background: transparent;
     backdrop-filter: none;
     box-sizing: border-box;
+    pointer-events: none;
 }
 
 .image-embeds-docs-popup.is-open {
@@ -103,6 +122,11 @@
     color: var(--SmartThemeTextColor, #f4f7fb);
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
     box-sizing: border-box;
+    pointer-events: auto;
+}
+
+.image-embeds-docs-panel.is-dragging {
+    user-select: none;
 }
 
 .image-embeds-docs-header {
@@ -110,6 +134,14 @@
     justify-content: space-between;
     align-items: flex-start;
     gap: 16px;
+    cursor: move;
+    touch-action: none;
+    user-select: none;
+}
+
+.image-embeds-docs-header button,
+.image-embeds-docs-header a {
+    cursor: pointer;
 }
 
 .image-embeds-docs-title {

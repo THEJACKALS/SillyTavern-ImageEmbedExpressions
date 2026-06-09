@@ -20,6 +20,11 @@ const ACTIVE_ACTIONS = [
     'watched', 'watches', 'climbed', 'climbs', 'ground', 'grinds', 'grabbed', 'grabs',
     'walk', 'come', 'comes', 'came', 'arrive', 'arrives', 'arrived',
     'blushed', 'blushes', 'cried', 'cries', 'stared', 'stares',
+    'swished', 'swishes', 'folded', 'folds', 'gleamed', 'gleams',
+    'scraped', 'scrapes', 'pulsed', 'pulses', 'doubled', 'doubles',
+    'slid', 'slides', 'marveled', 'marvels', 'teased', 'teases',
+    'responded', 'responds', 'collapsed', 'collapses', 'convulsed', 'convulses',
+    'stuttered', 'stutters', 'surged', 'surges', 'curled', 'curls',
 ];
 
 const ACTIVE_NOUNS = [
@@ -27,6 +32,8 @@ const ACTIVE_NOUNS = [
     'arms', 'shoulders', 'body', 'breathing', 'ears', 'tail', 'posture',
     'mouth', 'head', 'lips', 'tongue', 'grip', 'pace', 'brain', 'mind', 'thoughts',
     'breath', 'chest', 'skin', 'fingers', 'forehead', 'jaw', 'cheeks',
+    'laugh', 'blush', 'fangs', 'magic', 'movements', 'movement', 'hips',
+    'technique', 'efforts', 'body', 'climax', 'nails',
 ];
 
 function normalizeName(name) {
@@ -104,7 +111,7 @@ function detectActiveCharactersFromSegment(segment, characterKeys) {
     addActiveCharacter(active, seen, actionCharacter);
 
     const possessivePattern = ACTIVE_NOUNS.map(escapeRegExp).join('|');
-    const possessiveMatch = narrativeText.match(new RegExp(`^([A-Z][A-Za-z0-9' -]{0,48}?)(?:'s|’s)\\s+(${possessivePattern})\\b`));
+    const possessiveMatch = narrativeText.match(new RegExp(`^([A-Z][A-Za-z0-9' -]{0,48}?)(?:'s|’s)\\s+(?:\\w+\\s+){0,3}?(${possessivePattern})\\b`));
     const possessiveCharacter = possessiveMatch?.[1] ? findKnownCharacter(possessiveMatch[1], characterKeys) : '';
     addActiveCharacter(active, seen, possessiveCharacter);
 
@@ -114,7 +121,7 @@ function detectActiveCharactersFromSegment(segment, characterKeys) {
 
             const namePattern = escapeRegExp(plainName);
             const actionAnywhere = new RegExp(`\\b${namePattern}(?:'s|’s)?(?:[-\\s]+(?:chan|san|sama|kun|senpai|sensei))?\\b[^.!?\\n]{0,80}\\b(${actionPattern})\\b`, 'i');
-            const possessiveAnywhere = new RegExp(`\\b${namePattern}(?:'s|’s)\\s+(${possessivePattern})\\b`, 'i');
+            const possessiveAnywhere = new RegExp(`\\b${namePattern}(?:'s|’s)\\s+(?:\\w+\\s+){0,3}?(${possessivePattern})\\b`, 'i');
             const actionBeforeName = new RegExp(`\\b(${actionPattern})\\b[^.!?\\n]{0,40}\\b${namePattern}\\b`, 'i');
 
             if (

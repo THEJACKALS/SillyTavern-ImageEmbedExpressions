@@ -13,7 +13,7 @@
         </label>
         <label class="checkbox_label">
             <input type="checkbox" id="image_embeds_advanced_enabled">
-            <span>Advanced Expressions (let AI read the chat and pick the best expression) (Beta)</span>
+            <span>Advanced Expressions (Alpha)</span>
         </label>
 
         <!-- Advanced Expressions AI Configuration (Hidden by default) -->
@@ -82,7 +82,11 @@
         </label>
         <label class="checkbox_label">
             <input type="checkbox" id="image_embeds_user_enabled">
-            <span>Show User Expressions Mode (manage expressions tied to each character)</span>
+            <span>Show User Expressions</span>
+        </label>
+        <label class="checkbox_label">
+            <input type="checkbox" id="image_embeds_nosprite_enabled">
+            <span>Show NoSprite placeholders when an expression has no sprite</span>
         </label>
         <div style="margin-top: 8px; display: flex; gap: 5px; flex-wrap: wrap;">
             <button type="button" id="image_embeds_regenerate_current" class="menu_button" title="Clear and regenerate expressions for the currently opened character card only">
@@ -99,6 +103,15 @@
                     <button type="button" id="image_embeds_mode_char" class="menu_button" style="font-weight: bold;">Char</button>
                     <button type="button" id="image_embeds_mode_user" class="menu_button">User</button>
                 </div>
+            </label>
+            <label class="image-embeds-sort-control" title="Sort expression catalog">
+                <i class="fa-solid fa-arrow-down-a-z"></i>
+                <select id="image_embeds_sort" class="text_pole">
+                    <option value="name_asc">A-Z</option>
+                    <option value="name_desc">Z-A</option>
+                    <option value="newest">Newest</option>
+                    <option value="oldest">Oldest</option>
+                </select>
             </label>
             <button type="button" id="image_embeds_add" class="menu_button menu_button_icon" title="Add expression image">
                 <i class="fa-solid fa-plus"></i>
