@@ -31,6 +31,7 @@ const EXTENSION_ID = (() => {
 })();
 const SETTINGS_KEY = 'imageEmbedsExpressions';
 const EXPRESSION_DOCS_POSITION_KEY = `${SETTINGS_KEY}_docsPosition`;
+const ACTIVE_EXPRESSIONS_POSITION_KEY = `${SETTINGS_KEY}_activeExpressionsPosition`;
 const STORAGE_FOLDER = 'image-embeds-expressions';
 const NO_SPRITE_IMAGE_URL = new URL('./Assets/NoSprite.png', import.meta.url).href;
 const PLACEHOLDER_REGEX = /\{\{img::(.*?)\}\}/gi;
@@ -52,6 +53,7 @@ const defaultSettings = {
 const DEFAULT_CHARACTER_GROUP = '__default__';
 let lastAssistantMessageId = null;
 let currentMode = 'character'; // 'character' or 'user'
+let selectedActiveExpressionCharacter = '';
 let messagePlacementCache = new Map();
 const llmEligibleMessageIds = new Set();
 
@@ -235,7 +237,161 @@ function renderExpressionDocumentation() {
     }
 }
 
-function getClampedDocsPosition(left, top, panel) {
+function getEntryExpressionKeys(entry) {
+    const expression = parseEntryName(entry?.name).expression;
+    return getExpressionHintKeys(expression).slice(0, 1);
+}
+
+function getEntryCharacterKey(entry) {
+    return parseEntryName(entry?.name).character || DEFAULT_CHARACTER_GROUP;
+}
+
+function formatExpressionCharacterName(key) {
+    if (key === DEFAULT_CHARACTER_GROUP) {
+        return characters?.[this_chid]?.name || 'Default';
+    }
+
+    return formatExpressionKey(key);
+}
+
+function getExpressionCharacterGroups() {
+    const groups = new Map();
+
+    for (const entry of getCharacterEntries()) {
+        const characterKey = getEntryCharacterKey(entry);
+        const bucket = groups.get(characterKey) || [];
+        bucket.push(entry);
+        groups.set(characterKey, bucket);
+    }
+
+    return new Map([...groups.entries()].sort(([left], [right]) => {
+        if (left === DEFAULT_CHARACTER_GROUP) return -1;
+        if (right === DEFAULT_CHARACTER_GROUP) return 1;
+        return left.localeCompare(right);
+    }));
+}
+
+function getDisabledExpressionKeys(characterKey = DEFAULT_CHARACTER_GROUP) {
+    const characterSettings = getCurrentCharacterSettings();
+    return new Set(characterSettings?.disabledExpressionsByCharacter?.[characterKey] || []);
+}
+
+function isExpressionKeyActive(key, characterKey = DEFAULT_CHARACTER_GROUP) {
+    return !getDisabledExpressionKeys(characterKey).has(normalizeName(key));
+}
+
+function isEntryActive(entry) {
+    const keys = getEntryExpressionKeys(entry);
+    const characterKey = getEntryCharacterKey(entry);
+    return keys.length === 0 || keys.some(key => isExpressionKeyActive(key, characterKey));
+}
+
+function getActiveEntries(entries) {
+    return (entries || []).filter(isEntryActive);
+}
+
+function getAvailableExpressionCounts(entries) {
+    const counts = new Map();
+
+    for (const entry of entries || []) {
+        for (const key of getEntryExpressionKeys(entry)) {
+            counts.set(key, (counts.get(key) || 0) + 1);
+        }
+    }
+
+    return counts;
+}
+
+function renderActiveExpressions() {
+    const list = $('#image_embeds_active_expressions_list');
+    const characterList = $('#image_embeds_active_characters');
+    if (!list.length) return;
+
+    list.empty();
+    characterList.empty();
+
+    const characterGroups = getExpressionCharacterGroups();
+    const characterKeys = [...characterGroups.keys()];
+    if (!characterKeys.includes(selectedActiveExpressionCharacter)) {
+        selectedActiveExpressionCharacter = characterKeys[0] || '';
+    }
+
+    const characterCardName = characters?.[this_chid]?.name || 'Current character card';
+    $('#image_embeds_active_expressions_subtitle').text(
+        characterKeys.length
+            ? `${characterCardName}: ${characterKeys.length} character${characterKeys.length === 1 ? '' : 's'} found. New supported expressions are active automatically.`
+            : `${characterCardName}: no character-prefixed expressions were found.`,
+    );
+
+    for (const characterKey of characterKeys) {
+        const characterEntries = characterGroups.get(characterKey) || [];
+        const button = $('<button type="button" class="menu_button image-embeds-active-character"></button>')
+            .toggleClass('is-selected', characterKey === selectedActiveExpressionCharacter)
+            .attr('title', `Configure ${formatExpressionCharacterName(characterKey)} expressions`)
+            .append(
+                $('<span></span>').text(formatExpressionCharacterName(characterKey)),
+                $('<span class="image-embeds-active-character-count"></span>').text(characterEntries.length),
+            );
+
+        button.on('click', () => {
+            selectedActiveExpressionCharacter = characterKey;
+            renderActiveExpressions();
+        });
+        characterList.append(button);
+    }
+
+    if (!selectedActiveExpressionCharacter) {
+        list.append($('<div class="image-embeds-active-empty">Add expressions with names such as Ei_Annoyance or Miko_Angry first.</div>'));
+        return;
+    }
+
+    const selectedEntries = characterGroups.get(selectedActiveExpressionCharacter) || [];
+    const availableCounts = getAvailableExpressionCounts(selectedEntries);
+    const disabledKeys = getDisabledExpressionKeys(selectedActiveExpressionCharacter);
+    const entries = Object.keys(EXPRESSION_HINTS)
+        .sort((left, right) => left.localeCompare(right));
+
+    for (const key of entries) {
+        const availableCount = availableCounts.get(key) || 0;
+        const available = availableCount > 0;
+        const item = $('<label class="image-embeds-active-item"></label>')
+            .toggleClass('is-unavailable', !available);
+        const checkbox = $('<input type="checkbox">')
+            .prop('checked', available && !disabledKeys.has(key))
+            .prop('disabled', !available)
+            .attr('aria-label', `${formatExpressionKey(key)} expression`);
+
+        checkbox.on('change', (event) => {
+            const characterSettings = getCurrentCharacterSettings();
+            if (!characterSettings) return;
+            const nextDisabledKeys = new Set(characterSettings.disabledExpressionsByCharacter[selectedActiveExpressionCharacter] || []);
+
+            if (event.target.checked) {
+                nextDisabledKeys.delete(key);
+            } else {
+                nextDisabledKeys.add(key);
+            }
+
+            characterSettings.disabledExpressionsByCharacter[selectedActiveExpressionCharacter] = [...nextDisabledKeys].sort();
+            clearAiExpressionCache();
+            saveSettingsDebounced();
+            refreshAllMessages();
+        });
+
+        item.append(
+            checkbox,
+            $('<span class="image-embeds-active-name"></span>').text(formatExpressionKey(key)),
+            $('<span class="image-embeds-active-count"></span>').text(available ? `${availableCount} sprite${availableCount === 1 ? '' : 's'}` : 'No sprite'),
+        );
+        list.append(item);
+    }
+
+    if (!entries.length) {
+        list.append($('<div class="image-embeds-active-empty">No supported expressions are defined.</div>'));
+    }
+}
+
+function getClampedPopupPosition(left, top, panel) {
     const rect = panel.getBoundingClientRect();
     const margin = 8;
     const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
@@ -247,13 +403,13 @@ function getClampedDocsPosition(left, top, panel) {
     };
 }
 
-function applyExpressionDocsPosition() {
-    const panel = $('#image_embeds_expression_docs_popup .image-embeds-docs-panel').get(0);
+function applyPopupPosition(popupSelector, storageKey) {
+    const panel = $(`${popupSelector} .image-embeds-docs-panel`).get(0);
     if (!panel) return;
 
     let savedPosition = null;
     try {
-        savedPosition = JSON.parse(localStorage.getItem(EXPRESSION_DOCS_POSITION_KEY) || 'null');
+        savedPosition = JSON.parse(localStorage.getItem(storageKey) || 'null');
     } catch {
         savedPosition = null;
     }
@@ -266,14 +422,14 @@ function applyExpressionDocsPosition() {
     }
 
     panel.style.transform = 'none';
-    const position = getClampedDocsPosition(savedPosition.left, savedPosition.top, panel);
+    const position = getClampedPopupPosition(savedPosition.left, savedPosition.top, panel);
     panel.style.left = `${position.left}px`;
     panel.style.top = `${position.top}px`;
 }
 
-function bindExpressionDocsDrag() {
-    const panel = $('#image_embeds_expression_docs_popup .image-embeds-docs-panel').get(0);
-    const header = $('#image_embeds_expression_docs_popup .image-embeds-docs-header').get(0);
+function bindPopupDrag(popupSelector, storageKey) {
+    const panel = $(`${popupSelector} .image-embeds-docs-panel`).get(0);
+    const header = $(`${popupSelector} .image-embeds-docs-header`).get(0);
     if (!panel || !header || panel.dataset.dragBound === 'true') return;
 
     panel.dataset.dragBound = 'true';
@@ -295,7 +451,7 @@ function bindExpressionDocsDrag() {
         event.preventDefault();
 
         const movePanel = (moveEvent) => {
-            const position = getClampedDocsPosition(moveEvent.clientX - offsetX, moveEvent.clientY - offsetY, panel);
+            const position = getClampedPopupPosition(moveEvent.clientX - offsetX, moveEvent.clientY - offsetY, panel);
             panel.style.left = `${position.left}px`;
             panel.style.top = `${position.top}px`;
         };
@@ -307,7 +463,7 @@ function bindExpressionDocsDrag() {
             header.removeEventListener('pointercancel', stopDrag);
 
             const finalRect = panel.getBoundingClientRect();
-            localStorage.setItem(EXPRESSION_DOCS_POSITION_KEY, JSON.stringify({
+            localStorage.setItem(storageKey, JSON.stringify({
                 left: finalRect.left,
                 top: finalRect.top,
             }));
@@ -320,14 +476,34 @@ function bindExpressionDocsDrag() {
 }
 
 function openExpressionDocumentation() {
+    closeActiveExpressions();
     renderExpressionDocumentation();
     $('#image_embeds_expression_docs_popup')
         .appendTo('body')
         .addClass('is-open')
         .attr('aria-hidden', 'false')
         .css('display', 'flex');
-    bindExpressionDocsDrag();
-    applyExpressionDocsPosition();
+    bindPopupDrag('#image_embeds_expression_docs_popup', EXPRESSION_DOCS_POSITION_KEY);
+    applyPopupPosition('#image_embeds_expression_docs_popup', EXPRESSION_DOCS_POSITION_KEY);
+}
+
+function openActiveExpressions() {
+    closeExpressionDocumentation();
+    renderActiveExpressions();
+    $('#image_embeds_active_expressions_popup')
+        .appendTo('body')
+        .addClass('is-open')
+        .attr('aria-hidden', 'false')
+        .css('display', 'flex');
+    bindPopupDrag('#image_embeds_active_expressions_popup', ACTIVE_EXPRESSIONS_POSITION_KEY);
+    applyPopupPosition('#image_embeds_active_expressions_popup', ACTIVE_EXPRESSIONS_POSITION_KEY);
+}
+
+function closeActiveExpressions() {
+    $('#image_embeds_active_expressions_popup')
+        .removeClass('is-open')
+        .attr('aria-hidden', 'true')
+        .hide();
 }
 
 function closeExpressionDocumentation() {
@@ -560,7 +736,33 @@ function getCharacterKey() {
     if (!Array.isArray(settings.characters[avatar].entries)) {
         settings.characters[avatar].entries = [];
     }
+    if (!settings.characters[avatar].disabledExpressionsByCharacter || typeof settings.characters[avatar].disabledExpressionsByCharacter !== 'object') {
+        settings.characters[avatar].disabledExpressionsByCharacter = {};
+    }
+    const disabledByCharacter = settings.characters[avatar].disabledExpressionsByCharacter;
+    for (const [characterKey, disabledExpressions] of Object.entries(disabledByCharacter)) {
+        disabledByCharacter[characterKey] = Array.isArray(disabledExpressions)
+            ? [...new Set(disabledExpressions.map(normalizeName).filter(Boolean))]
+            : [];
+    }
+
+    if (Array.isArray(settings.characters[avatar].disabledExpressions)) {
+        const legacyDisabledExpressions = [...new Set(settings.characters[avatar].disabledExpressions.map(normalizeName).filter(Boolean))];
+        const expressionCharacters = new Set(settings.characters[avatar].entries.map(getEntryCharacterKey));
+        for (const characterKey of expressionCharacters) {
+            disabledByCharacter[characterKey] = [
+                ...new Set([...(disabledByCharacter[characterKey] || []), ...legacyDisabledExpressions]),
+            ];
+        }
+        delete settings.characters[avatar].disabledExpressions;
+        saveSettingsDebounced();
+    }
     return avatar;
+}
+
+function getCurrentCharacterSettings() {
+    const key = getCharacterKey();
+    return key ? ensureSettings().characters[key] : null;
 }
 
 function getCharacterEntries() {
@@ -621,26 +823,30 @@ function findEntryByName(name) {
     const target = normalizeName(name);
 
     if (ensureSettings().noSpriteEnabled && target.startsWith('nosprite_')) {
-        return buildNoSpriteEntry(target.replace(/^nosprite_/, ''));
+        const expressionKey = target.replace(/^nosprite_/, '');
+        return isExpressionKeyActive(expressionKey) ? buildNoSpriteEntry(expressionKey) : null;
     }
 
     // Search character entries first
     let entry = getCharacterEntries().find(entry => normalizeName(entry.name) === target);
-    if (entry) return entry;
+    if (entry) return isEntryActive(entry) ? entry : null;
 
     // Then search user entries if available
     if (currentMode === 'user') {
         entry = getUserEntries().find(entry => normalizeName(entry.name) === target);
     }
-    return entry || null;
+    return entry && isEntryActive(entry) ? entry : null;
 }
 
-function buildNoSpriteEntry(expressionName) {
+function buildNoSpriteEntry(expressionName, characterKey = DEFAULT_CHARACTER_GROUP) {
     if (!ensureSettings().noSpriteEnabled) {
         return null;
     }
 
     const expression = normalizeName(expressionName || 'unknown') || 'unknown';
+    if (!isExpressionKeyActive(expression, normalizeName(characterKey) || DEFAULT_CHARACTER_GROUP)) {
+        return null;
+    }
 
     return {
         id: `nosprite:${expression}`,
@@ -1020,6 +1226,7 @@ function scoreDetectedExpressionKeys(messageText) {
     const scores = [];
 
     for (const [key, hints] of Object.entries(EXPRESSION_HINTS)) {
+        if (!isExpressionKeyActive(key)) continue;
         let score = 0;
 
         if (key && new RegExp(`\\b${escapeRegExp(key)}\\b`, 'i').test(cleaned)) {
@@ -1054,10 +1261,11 @@ function hasExactExpressionEntry(entries, expressionKey) {
 function findNoSpriteEntryForDetectedExpression(messageText, entries) {
     const detected = scoreDetectedExpressionKeys(messageText)[0];
     if (!detected) return null;
+    const characterKey = entries?.length ? getEntryCharacterKey(entries[0]) : DEFAULT_CHARACTER_GROUP;
 
     return hasExactExpressionEntry(entries, detected.key)
         ? null
-        : buildNoSpriteEntry(detected.key);
+        : buildNoSpriteEntry(detected.key, characterKey);
 }
 
 function buildNoSpritePlacementForMessage(messageText, characterKey = DEFAULT_CHARACTER_GROUP, dominance = null) {
@@ -1066,7 +1274,7 @@ function buildNoSpritePlacementForMessage(messageText, characterKey = DEFAULT_CH
 
     const character = normalizeName(characterKey || DEFAULT_CHARACTER_GROUP);
     const safeDominance = dominance || { blocksByCharacter: new Map() };
-    const entry = buildNoSpriteEntry(detected.key);
+    const entry = buildNoSpriteEntry(detected.key, character);
     return entry ? buildPlacementForEntry(entry, character, safeDominance, character) : null;
 }
 
@@ -1704,7 +1912,7 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
 
     // Handle user messages - use same detection logic as character messages
     if (message.is_user) {
-        const userEntries = getUserEntries();
+        const userEntries = getActiveEntries(getUserEntries());
         if (!userEntries.length) return [];
 
         const messageText = String(message.mes || '').toLowerCase();
@@ -1741,11 +1949,11 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
 
     // Handle character/assistant messages
     const messageTextRaw = String(message.mes || '');
-    const activeCardEntries = getCharacterEntries();
+    const activeCardEntries = getActiveEntries(getCharacterEntries());
     const usingCrossPackEntries = activeCardEntries.length === 0;
     const entries = activeCardEntries.length
         ? activeCardEntries
-        : getCrossPackEntriesForMessage(messageTextRaw);
+        : getActiveEntries(getCrossPackEntriesForMessage(messageTextRaw));
 
     const settings = ensureSettings();
     const messageText = messageTextRaw.toLowerCase();
@@ -1922,7 +2130,7 @@ function pickEntriesForMessageLegacy(messageId, allowMultiple = false) {
 async function pickEntriesForMessage(messageId, allowMultiple = false) {
     const message = chat?.[messageId];
     const settings = ensureSettings();
-    const cacheEntries = message?.is_user ? getUserEntries() : getCharacterEntries();
+    const cacheEntries = getActiveEntries(message?.is_user ? getUserEntries() : getCharacterEntries());
     const groupedEntries = groupEntriesByCharacter(cacheEntries);
     const contextCharacterKeys = Array.from(groupedEntries.keys()).filter(key => key && key !== DEFAULT_CHARACTER_GROUP);
     const strictCharacterScopedEntries = !message?.is_user && hasStrictCharacterScopedEntries(cacheEntries);
@@ -1954,6 +2162,7 @@ async function pickEntriesForMessage(messageId, allowMultiple = false) {
         recentContext: recentContext.primary,
         activeMessageCharacters: activeMessageCharacterKeys,
         llmEligible: canUseLLMForMessage(messageId),
+        disabledExpressionsByCharacter: getCurrentCharacterSettings()?.disabledExpressionsByCharacter || {},
         entries: cacheEntries.map(entry => `${entry.id || ''}:${entry.name || ''}:${entry.url || ''}`),
     }));
 
@@ -1970,7 +2179,7 @@ async function pickEntriesForMessage(messageId, allowMultiple = false) {
         return legacySelections;
     }
 
-    const allEntries = getCharacterEntries();
+    const allEntries = getActiveEntries(getCharacterEntries());
     if (!allEntries.length) {
         messagePlacementCache.set(cacheKey, legacySelections);
         return legacySelections;
@@ -2357,6 +2566,7 @@ function renderList() {
             placeholder.text(buildPlaceholder(entry.name || ''));
             clearAiExpressionCache();
             saveSettingsDebounced();
+            renderActiveExpressions();
             refreshAllMessages();
         });
 
@@ -2375,6 +2585,7 @@ function renderList() {
             clearAiExpressionCache();
             saveSettingsDebounced();
             renderList();
+            renderActiveExpressions();
             refreshAllMessages();
         });
 
@@ -2474,6 +2685,7 @@ async function addExpressionFromFile(file) {
         clearAiExpressionCache();
         saveSettingsDebounced();
         renderList();
+        renderActiveExpressions();
         refreshAllMessages();
         toastr.success('Image expression added.', 'Image Embeds');
     } catch (error) {
@@ -2901,6 +3113,19 @@ function bindUi() {
         closeExpressionDocumentation();
     });
 
+    $('#image_embeds_active_expressions').on('click', () => {
+        const popup = $('#image_embeds_active_expressions_popup');
+        if (popup.hasClass('is-open')) {
+            closeActiveExpressions();
+        } else {
+            openActiveExpressions();
+        }
+    });
+
+    $('#image_embeds_active_expressions_close').on('click', () => {
+        closeActiveExpressions();
+    });
+
     $('#image_embeds_mode_char').on('click', () => {
         if (!getCharacterKey()) return;
         currentMode = 'character';
@@ -2973,6 +3198,7 @@ async function injectSettingsUi() {
     }
 
     renderExpressionDocumentation();
+    renderActiveExpressions();
 }
 
 function bindEvents() {
@@ -2983,8 +3209,10 @@ function bindEvents() {
     eventSource.on(event_types.MORE_MESSAGES_LOADED, () => refreshAllMessages());
     eventSource.on(event_types.CHAT_CHANGED, () => {
         lastAssistantMessageId = null;
+        selectedActiveExpressionCharacter = '';
         llmEligibleMessageIds.clear();
         renderList();
+        renderActiveExpressions();
         refreshAllMessages();
     });
     eventSource.on(event_types.EXTENSIONS_FIRST_LOAD, () => refreshAllMessages());
