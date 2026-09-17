@@ -7,48 +7,49 @@ import { getRequestHeaders } from '/script.js';
 const HORDE_ANONYMOUS_API_KEY = '0000000000';
 
 export const API_PROVIDERS = {
-    // OpenAI and OpenAI-compatible APIs
     openai: {
         name: 'OpenAI',
         baseUrl: 'https://api.openai.com/v1',
-        models: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-        defaultModel: 'gpt-3.5-turbo',
-        requiresAuth: true
+        models: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-4o-mini'],
+        defaultModel: 'gpt-4o-mini',
+        requiresAuth: true,
+        description: 'Current account models are loaded from the OpenAI Models API when possible.',
     },
     anthropic: {
         name: 'Anthropic (Claude)',
         baseUrl: 'https://api.anthropic.com/v1',
-        models: ['claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku'],
-        defaultModel: 'claude-3-haiku',
-        requiresAuth: true
+        models: ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+        defaultModel: 'claude-haiku-4-5-20251001',
+        requiresAuth: true,
+        description: 'Current account models are loaded from the Anthropic Models API when possible.',
     },
     deepseek: {
-        name: 'Deepseek',
+        name: 'DeepSeek',
         baseUrl: 'https://api.deepseek.com/v1',
-        models: ['deepseek-chat', 'deepseek-coder'],
-        defaultModel: 'deepseek-chat',
-        requiresAuth: true
+        models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+        defaultModel: 'deepseek-v4-flash',
+        requiresAuth: true,
     },
     xai: {
         name: 'xAI (Grok)',
         baseUrl: 'https://api.x.ai/v1',
-        models: ['grok-beta'],
-        defaultModel: 'grok-beta',
-        requiresAuth: true
+        models: ['grok-4.3', 'grok-4.20', 'grok-3-mini'],
+        defaultModel: 'grok-4.3',
+        requiresAuth: true,
     },
     groq: {
         name: 'Groq',
         baseUrl: 'https://api.groq.com/openai/v1',
-        models: ['mixtral-8x7b-32768', 'llama2-70b-4096'],
-        defaultModel: 'mixtral-8x7b-32768',
-        requiresAuth: true
+        models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
+        defaultModel: 'llama-3.3-70b-versatile',
+        requiresAuth: true,
     },
     perplexity: {
         name: 'Perplexity',
         baseUrl: 'https://api.perplexity.ai',
-        models: ['pplx-7b-online', 'pplx-70b-online'],
-        defaultModel: 'pplx-7b-online',
-        requiresAuth: true
+        models: ['sonar', 'sonar-pro', 'sonar-reasoning-pro', 'sonar-deep-research'],
+        defaultModel: 'sonar',
+        requiresAuth: true,
     },
     openrouter: {
         name: 'OpenRouter',
@@ -57,43 +58,57 @@ export const API_PROVIDERS = {
         defaultModel: 'auto',
         requiresAuth: true,
         editable: true,
-        description: 'Supports hundreds of models'
+        description: 'Loads the models currently available to your OpenRouter key.',
     },
     ollama: {
         name: 'Ollama (Local)',
         baseUrl: 'http://localhost:11434/v1',
-        models: ['mistral', 'llama2', 'neural-chat'],
-        defaultModel: 'mistral',
+        models: [],
+        defaultModel: '',
         requiresAuth: false,
+        optionalAuth: true,
         editable: true,
-        description: 'Local Ollama server'
+        description: 'Loads the models installed on your local Ollama server.',
     },
     llamacpp: {
         name: 'Llama.cpp (Local)',
         baseUrl: 'http://localhost:8000/v1',
-        models: ['gpt-3.5-turbo'],
-        defaultModel: 'gpt-3.5-turbo',
+        models: [],
+        defaultModel: '',
         requiresAuth: false,
+        optionalAuth: true,
         editable: true,
-        description: 'Local Llama.cpp server'
+        description: 'OpenAI-compatible llama.cpp server.',
+    },
+    koboldcpp: {
+        name: 'KoboldCPP (Local)',
+        baseUrl: 'http://localhost:5001/v1',
+        models: [],
+        defaultModel: '',
+        requiresAuth: false,
+        optionalAuth: true,
+        editable: true,
+        description: 'OpenAI-compatible KoboldCPP server. The loaded GGUF model is remembered for this provider.',
     },
     lmstudio: {
         name: 'LM Studio (Local)',
         baseUrl: 'http://localhost:1234/v1',
-        models: ['local-model'],
-        defaultModel: 'local-model',
+        models: [],
+        defaultModel: '',
         requiresAuth: false,
+        optionalAuth: true,
         editable: true,
-        description: 'Local LM Studio server'
+        description: 'Loads models from the local LM Studio server.',
     },
     aphrodite: {
         name: 'Aphrodite Engine (Local)',
         baseUrl: 'http://localhost:5000/v1',
-        models: ['gpt-3.5-turbo'],
-        defaultModel: 'gpt-3.5-turbo',
+        models: [],
+        defaultModel: '',
         requiresAuth: false,
+        optionalAuth: true,
         editable: true,
-        description: 'Local Aphrodite Engine server'
+        description: 'OpenAI-compatible Aphrodite Engine server.',
     },
     horde: {
         name: 'Horde AI',
@@ -102,7 +117,7 @@ export const API_PROVIDERS = {
         defaultModel: '',
         requiresAuth: false,
         optionalAuth: true,
-        description: 'Distributed AI. Leave the API key empty to use anonymous key 0000000000.'
+        description: 'Distributed AI. Models are loaded live; an empty key uses the anonymous Horde key.',
     },
     custom: {
         name: 'Custom / OpenAI-compatible',
@@ -110,10 +125,11 @@ export const API_PROVIDERS = {
         models: [],
         defaultModel: '',
         requiresAuth: false,
+        optionalAuth: true,
         editable: true,
         customModel: true,
-        description: 'Use any chat-completions endpoint with your own base URL and model'
-    }
+        description: 'Use any OpenAI-compatible chat-completions endpoint.',
+    },
 };
 
 /**
@@ -141,17 +157,15 @@ export async function callAIProvider(provider, apiKey, prompt, options = {}) {
     try {
         switch (provider) {
             case 'anthropic':
-                return await callAnthropicAPI(baseUrl, apiKey, model, prompt, maxTokens, temperature);
+                return await callAnthropicAPI(baseUrl, apiKey, model, prompt, maxTokens, temperature, options.signal);
             
             case 'ollama':
             case 'llamacpp':
+            case 'koboldcpp':
             case 'lmstudio':
             case 'aphrodite':
             case 'horde':
             case 'custom':
-                // Use the ST backend as a proxy for local/custom providers to avoid browser CORS/preflight issues.
-                return await callOpenAICompatibleProxyAPI(baseUrl, resolvedApiKey, model, prompt, maxTokens, temperature);
-            
             case 'openai':
             case 'deepseek':
             case 'xai':
@@ -159,8 +173,8 @@ export async function callAIProvider(provider, apiKey, prompt, options = {}) {
             case 'perplexity':
             case 'openrouter':
             default:
-                // OpenAI-compatible API
-                return await callOpenAICompatibleAPI(baseUrl, resolvedApiKey, model, prompt, maxTokens, temperature);
+                // Keep credentials and CORS handling inside the SillyTavern backend.
+                return await callOpenAICompatibleProxyAPI(baseUrl, resolvedApiKey, model, prompt, maxTokens, temperature, options.signal);
         }
     } catch (error) {
         console.error(`Error calling ${provider} API:`, error);
@@ -168,77 +182,35 @@ export async function callAIProvider(provider, apiKey, prompt, options = {}) {
     }
 }
 
-/**
- * Call OpenAI-compatible API
- */
-async function callOpenAICompatibleAPI(baseUrl, apiKey, model, prompt, maxTokens, temperature) {
-    const endpoint = `${normalizeBaseUrl(baseUrl)}/chat/completions`;
-    const headers = {
-        'Content-Type': 'application/json',
-    };
-
-    if (apiKey) {
-        headers.Authorization = `Bearer ${apiKey}`;
-    }
-    
-    const response = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-            model: model,
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You are a helpful assistant that analyzes character emotions and expressions.'
-                },
-                {
-                    role: 'user',
-                    content: prompt
-                }
-            ],
-            max_tokens: maxTokens,
-            temperature: temperature
-        })
-    });
-
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`API error (${response.status}): ${errorData.error?.message || response.statusText}`);
-    }
-
-    const data = await response.json();
-    
-    if (data.choices && data.choices[0] && data.choices[0].message) {
-        return data.choices[0].message.content.trim();
-    }
-
-    throw new Error(getUnexpectedResponseMessage(data, baseUrl));
-}
-
-async function callOpenAICompatibleProxyAPI(baseUrl, apiKey, model, prompt, maxTokens, temperature) {
+async function callOpenAICompatibleProxyAPI(baseUrl, apiKey, model, prompt, maxTokens, temperature, signal) {
     const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+    const requestBody = {
+        chat_completion_source: 'custom',
+        custom_url: normalizedBaseUrl,
+        custom_include_headers: apiKey ? JSON.stringify({ Authorization: `Bearer ${apiKey}` }) : '',
+        model,
+        max_tokens: maxTokens,
+        stream: false,
+        messages: [
+            {
+                role: 'system',
+                content: 'You are a helpful assistant that analyzes character emotions and expressions.',
+            },
+            {
+                role: 'user',
+                content: prompt,
+            },
+        ],
+    };
+    if (modelSupportsTemperature(model)) {
+        requestBody.temperature = temperature;
+    }
+
     const response = await fetch('/api/backends/chat-completions/generate', {
         method: 'POST',
         headers: getRequestHeaders(),
-        body: JSON.stringify({
-            chat_completion_source: 'custom',
-            custom_url: normalizedBaseUrl,
-            custom_include_headers: apiKey ? JSON.stringify({ Authorization: `Bearer ${apiKey}` }) : '',
-            model,
-            temperature,
-            max_tokens: maxTokens,
-            stream: false,
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You are a helpful assistant that analyzes character emotions and expressions.',
-                },
-                {
-                    role: 'user',
-                    content: prompt,
-                },
-            ],
-        }),
+        body: JSON.stringify(requestBody),
+        signal,
     });
 
     const data = await response.json().catch(() => ({}));
@@ -257,8 +229,22 @@ async function callOpenAICompatibleProxyAPI(baseUrl, apiKey, model, prompt, maxT
 /**
  * Call Anthropic Claude API
  */
-async function callAnthropicAPI(baseUrl, apiKey, model, prompt, maxTokens, temperature) {
+async function callAnthropicAPI(baseUrl, apiKey, model, prompt, maxTokens, temperature, signal) {
     const endpoint = `${baseUrl}/messages`;
+    const requestBody = {
+        model: model,
+        max_tokens: maxTokens,
+        system: 'You are a helpful assistant that analyzes character emotions and expressions.',
+        messages: [
+            {
+                role: 'user',
+                content: prompt,
+            },
+        ],
+    };
+    if (modelSupportsTemperature(model)) {
+        requestBody.temperature = temperature;
+    }
     
     const response = await fetch(endpoint, {
         method: 'POST',
@@ -267,18 +253,8 @@ async function callAnthropicAPI(baseUrl, apiKey, model, prompt, maxTokens, tempe
             'x-api-key': apiKey,
             'anthropic-version': '2023-06-01'
         },
-        body: JSON.stringify({
-            model: model,
-            max_tokens: maxTokens,
-            system: 'You are a helpful assistant that analyzes character emotions and expressions.',
-            messages: [
-                {
-                    role: 'user',
-                    content: prompt
-                }
-            ],
-            temperature: temperature
-        })
+        body: JSON.stringify(requestBody),
+        signal,
     });
 
     if (!response.ok) {
@@ -357,6 +333,12 @@ export async function fetchProviderModels(provider, apiKey, options = {}) {
         return staticModels;
     }
 
+    const customHeaders = provider === 'anthropic'
+        ? {
+            'x-api-key': resolvedApiKey,
+            'anthropic-version': '2023-06-01',
+        }
+        : (resolvedApiKey ? { Authorization: `Bearer ${resolvedApiKey}` } : {});
     const response = await fetch('/api/backends/chat-completions/status', {
         method: 'POST',
         headers: getRequestHeaders(),
@@ -364,7 +346,7 @@ export async function fetchProviderModels(provider, apiKey, options = {}) {
         body: JSON.stringify({
             chat_completion_source: 'custom',
             custom_url: baseUrl,
-            custom_include_headers: resolvedApiKey ? JSON.stringify({ Authorization: `Bearer ${resolvedApiKey}` }) : '',
+            custom_include_headers: JSON.stringify(customHeaders),
         }),
     });
 
@@ -374,7 +356,10 @@ export async function fetchProviderModels(provider, apiKey, options = {}) {
 
     const data = await response.json().catch(() => ({}));
     const models = Array.isArray(data?.data)
-        ? data.data.map(model => String(model?.id || '').trim()).filter(Boolean)
+        ? data.data
+            .filter(model => isTextGenerationModel(provider, model))
+            .map(model => String(model?.id || '').trim())
+            .filter(Boolean)
         : [];
 
     return models.length ? models : staticModels;
@@ -457,7 +442,26 @@ function shouldFetchModelsThroughProxy(provider, baseUrl) {
         return false;
     }
 
-    return ['ollama', 'llamacpp', 'lmstudio', 'aphrodite', 'horde', 'custom'].includes(provider);
+    return provider !== 'horde';
+}
+
+function modelSupportsTemperature(model) {
+    const normalizedModel = String(model || '').toLowerCase();
+    return !/^(gpt-5|o[134](?:-|$)|claude-(?:fable|mythos)|claude-opus-4-(?:7|8))/.test(normalizedModel);
+}
+
+function isTextGenerationModel(provider, model) {
+    if (['ollama', 'llamacpp', 'koboldcpp', 'lmstudio', 'aphrodite', 'custom', 'anthropic', 'deepseek', 'perplexity'].includes(provider)) {
+        return true;
+    }
+
+    const id = String(model?.id || '').toLowerCase();
+    const outputModalities = model?.architecture?.output_modalities;
+    if (Array.isArray(outputModalities) && !outputModalities.includes('text')) {
+        return false;
+    }
+
+    return !/(embedding|moderation|whisper|transcri|speech|tts|realtime|image|video)/.test(id);
 }
 
 /**

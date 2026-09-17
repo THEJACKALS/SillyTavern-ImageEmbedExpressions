@@ -1,3 +1,4 @@
+import { saveSettingsDebounced } from '/script.js';
 import { getStringHash } from '/scripts/utils.js';
 import {
     callAIProvider,
@@ -5,7 +6,7 @@ import {
     providerRequiresApiKey,
 } from './api-providers.js';
 
-export const EXPRESSION_DETECTION_VERSION = 10;
+export const EXPRESSION_DETECTION_VERSION = 11;
 
 const AI_CACHE_STORAGE_KEY = `imageEmbedsExpressions_aiCache_v${EXPRESSION_DETECTION_VERSION}`;
 const AI_CACHE_MAX_ENTRIES = 500;
@@ -38,6 +39,21 @@ function saveAiExpressionCache(cacheMap) {
 
 let aiExpressionCache = loadAiExpressionCache();
 
+function recordProviderUsage(settings) {
+    const provider = settings?.apiProvider;
+    const profile = settings?.providerProfiles?.[provider];
+    if (!provider || !profile) return;
+
+    const model = String(profile.model || settings.apiModel || '').trim();
+    profile.usageCount = Number.isFinite(profile.usageCount) ? profile.usageCount + 1 : 1;
+    profile.lastUsedAt = new Date().toISOString();
+    if (model) {
+        const recentModels = Array.isArray(profile.recentModels) ? profile.recentModels : [];
+        profile.recentModels = [model, ...recentModels.filter(item => item !== model)].slice(0, 8);
+    }
+    saveSettingsDebounced();
+}
+
 export function clearExpressionAiCache() {
     aiExpressionCache.clear();
     try { localStorage.removeItem(AI_CACHE_STORAGE_KEY); } catch { /* ignore */ }
@@ -54,12 +70,22 @@ function trimMessageToTokenLimit(messageText, tokenLimit = MESSAGE_CONTEXT_TOKEN
 }
 
 function buildAvailableExpressionList(entries, parseEntryName) {
+    const seenDisplayNames = new Set();
+
     return entries
         .map(entry => ({
             name: entry.name,
             displayName: parseEntryName(entry.name).expression,
         }))
-        .filter(entry => entry.displayName);
+        .filter(entry => {
+            const key = String(entry.displayName || '').trim().toLowerCase();
+            if (!key || seenDisplayNames.has(key)) {
+                return false;
+            }
+
+            seenDisplayNames.add(key);
+            return true;
+        });
 }
 
 function buildStatelessExpressionPrompt({ characterName, messageText, availableExpressions }) {
@@ -85,6 +111,8 @@ Selection rules:
 - Prefer visible facial/body cues, dialogue delivery, and immediate action.
 - Do not choose based on another character's emotion.
 - If several emotions are possible, choose the strongest visible expression.
+- The exact emotion may be absent from the list. In that case, adapt it to the closest available expression.
+- Never invent, rename, combine, or mention an expression that is not in the list.
 - Respond with exactly one expression name from the list above.
 - No explanation, no punctuation, no extra text.`;
 }
@@ -160,8 +188,12 @@ export async function detectExpressionWithAI({
             return null;
         }
 
+        recordProviderUsage(settings);
+
         const responseText = normalizeName(aiResponse.trim()).replace(/_/g, ' ');
         const matchedExpression = availableExpressions.find(entry =>
+            responseText === normalizeName(entry.displayName).replace(/_/g, ' ')
+        ) || availableExpressions.find(entry =>
             responseText.includes(normalizeName(entry.displayName).replace(/_/g, ' '))
         );
         const selectedExpression = matchedExpression ? matchedExpression.name : null;

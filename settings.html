@@ -52,7 +52,8 @@
                         <option value="">-- Select or type model name --</option>
                     </select>
                     <input type="text" id="image_embeds_api_model_custom" class="text_pole" placeholder="Type any model name" style="width: 100%; margin-top: 5px; display: none;">
-                    <small style="display: block; margin-top: 5px; color: #888;">Pick a preset model, or type one when the provider has no preset list</small>
+                    <small style="display: block; margin-top: 5px; color: #888;">Each provider remembers its own last model and recent model history.</small>
+                    <div id="image_embeds_model_history" class="image-embeds-model-history" style="display: none;"></div>
                 </div>
 
                 <div style="margin-bottom: 10px;">
@@ -88,14 +89,14 @@
             <input type="checkbox" id="image_embeds_nosprite_enabled">
             <span>Show NoSprite placeholders when an expression has no sprite</span>
         </label>
-        <div style="margin-top: 8px; display: flex; gap: 5px; flex-wrap: wrap;">
-            <button type="button" id="image_embeds_regenerate_current" class="menu_button" title="Clear and regenerate expressions for the currently opened character card only">
+        <div class="image-embeds-btn-group" style="margin-top: 8px;">
+            <button type="button" id="image_embeds_regenerate_current" class="menu_button image-embeds-btn" title="Clear and regenerate expressions for the currently opened character card only">
                 <i class="fa-solid fa-rotate"></i> Regenerate Expressions
             </button>
-            <button type="button" id="image_embeds_expression_docs" class="menu_button" title="Show supported expression categories">
+            <button type="button" id="image_embeds_expression_docs" class="menu_button image-embeds-btn" title="Show supported expression categories">
                 <i class="fa-solid fa-book"></i> Documentation
             </button>
-            <button type="button" id="image_embeds_active_expressions" class="menu_button" title="Choose which available expressions can be displayed">
+            <button type="button" id="image_embeds_active_expressions" class="menu_button image-embeds-btn" title="Choose which available expressions can be displayed">
                 <i class="fa-solid fa-list-check"></i> Active Expressions
             </button>
         </div>
@@ -128,6 +129,14 @@
             <span>4. Expressions are injected using placeholder: <code>{{img::expression_name}}</code>, and support separators eg; <code>/</code> <code>\</code> <code>|</code> <code>-</code> <code>_</code>, Example: <code>Jean-Luc/smile</code>, <code>Dima_Neutral</code>, <code>Evelyn/smile</code>, <code>Violet-huhu</code>, <code>Miko|focused</code></span><br>
             <span>5. You can use double expressions as you checklist Enabled Double Expressions</span>
         </p>
+        <div class="image-embeds-btn-group">
+            <button type="button" id="image_embeds_backup_all" class="menu_button image-embeds-btn" title="Bulk backup all character and user expression images formatted with character and expression names">
+                <i class="fa-solid fa-download"></i> Backup Expressions
+            </button>
+            <button type="button" id="image_embeds_convert_all_webp" class="menu_button image-embeds-btn" title="Convert all existing saved expressions to .webp">
+                <i class="fa-solid fa-file-image"></i> Convert All Existing to WebP
+            </button>
+        </div>
         <div id="image_embeds_expression_docs_popup" class="image-embeds-docs-popup" aria-hidden="true" style="display: none;">
             <div class="image-embeds-docs-panel" role="dialog" aria-modal="true" aria-labelledby="image_embeds_expression_docs_title">
                 <div class="image-embeds-docs-header">

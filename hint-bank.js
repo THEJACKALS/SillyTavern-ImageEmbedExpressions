@@ -14,6 +14,7 @@ export const EXPRESSION_HINTS = {
         'wonder in his eyes', 'starry eyed', 'starry-eyed', 'perfect', 'dangerously perfect',
         'heart-meltingly perfect', 'being considerate', 'genuine', 'present',
         'admiring', 'observed', 'lucky for me', 'impressive control',
+        'that someone is you', 'someone is you',
     ],
     amusement: [
         'amused', 'amusement', 'chuckled', 'chuckling', 'laughed softly', 'laughing softly',
@@ -62,6 +63,8 @@ export const EXPRESSION_HINTS = {
         'curious', 'curiosity', 'intrigued', 'interested', 'leaned in', 'leans in',
         'raised an eyebrow', 'arched an eyebrow', 'tell me more', 'questioning look',
         'inquisitive', 'studied you', 'ara', 'ara~',
+        'scientific curiosity', 'equal parts scientific curiosity', 'looking down with curiosity',
+        'watched with curiosity',
     ],
     desire: [
         'desire', 'desired', 'want', 'wanted', 'longing', 'yearning', 'hungry gaze',
@@ -77,7 +80,10 @@ export const EXPRESSION_HINTS = {
         'worship every inch', 'deserve to be worshipped',
         'thick with desire', 'want to taste you again', 'taste you again',
         'fill my mouth', 'let me swallow', 'very interested in sampling you',
-        'interested in sampling you',
+        'interested in sampling you', 'desperate want', 'unguarded want',
+        'absolute want', 'want remained unguarded', 'want remained unguarded and absolute',
+        'half-lidded gaze', 'pulse skip', 'dont make me wait', "don't make me wait",
+        'darling~',
     ],
     arousal: [
         'arousal', 'aroused', 'heated gaze', 'heat pooled', 'breath hitched',
@@ -102,6 +108,10 @@ export const EXPRESSION_HINTS = {
         'tail swished excitedly', 'warm and intimate', 'mouth working magic',
         'working magic on your length', 'taking you in her mouth eagerly',
         'already hard again', 'inner walls clamping down', 'magic pulsing',
+        'hips stuttering', 'body seizing', 'back arching', 'arched off the table',
+        'rhythmic pulses', 'panting', 'slick with sweat', 'cheeks were flushed',
+        'body trembling with barely contained arousal', 'barely contained arousal',
+        'tail curled tight', 'ears perked straight up', 'taut with anticipation',
     ],
     disappointment: [
         'disappointed', 'disappointment', 'let down', 'deflated', 'shoulders slumped',
@@ -155,6 +165,8 @@ export const EXPRESSION_HINTS = {
         'thrilling', 'hurry up', 'want to see what happens',
         'surprised delighted', 'laugh was surprised delighted', 'energetic playful',
         'magic hummed around you both energetic playful', 'once more', 'just once more',
+        'my turn', 'finally', 'climbed onto the table', 'positioning herself',
+        'taut with anticipation', 'ears perked straight up',
     ],
     fear: [
         'afraid', 'fear', 'fearful', 'scared', 'terrified', 'frightened', 'pale',
@@ -213,6 +225,9 @@ export const EXPRESSION_HINTS = {
         'am i a terrible person', 'wondered if you were safe', 'wondered if you were hurt',
         'if you had forgotten about me', "if you'd forgotten about me",
         'i do not handle separation well', "i don't handle separation well",
+        'there has been a leak', 'nothing catastrophic yet', 'before i contain it',
+        'my position here becomes inconvenient', 'position here becomes inconvenient',
+        'needs discreet handling', 'discreet handling',
     ],
     nervousness: [
         'nervous', 'nervousness', 'anxious', 'uneasy', 'tremor in her voice',
@@ -238,6 +253,10 @@ export const EXPRESSION_HINTS = {
         'neutral', 'calm', 'blank expression', 'blank face', 'expressionless', 'deadpan',
         'flat tone', 'even tone', 'matter of fact', 'matter-of-fact', 'composed',
         'unreadable', 'stoic', 'waited listening', 'listening to footsteps',
+        'half-drawn curtains', 'stared at the screen', 'exhaled quietly through her nose',
+        'without hurry', 'slow deliberate motion', 'slow deliberate', 'controlled but slower',
+        'controlled movements', 'usual unreadable mask', 'crimson eyes met his without wavering',
+        'without wavering',
     ],
     optimism: [
         'optimistic', 'optimism', 'hopeful', 'hope', 'confident smile', 'encouraging smile',
@@ -250,7 +269,8 @@ export const EXPRESSION_HINTS = {
         'satisfied possessive', 'all i need', 'stupid stubborn loyal',
         'impressive control', 'making me greedy',
         'satisfaction', 'with satisfaction', 'technique perfect',
-        'impressive control right',
+        'impressive control right', 'half-lidded satisfied', 'half lidded satisfied',
+        'satisfied glowing', 'satisfied grin', 'slow exhausted grin', 'impressive',
     ],
     smug: [
         'smug', 'smugly', 'smug smile', 'smug grin', 'smirked knowingly',
@@ -270,6 +290,8 @@ export const EXPRESSION_HINTS = {
         'body relaxing fully', 'relaxing fully against yours',
         'half laugh half sob', 'half-laugh half-sob',
         'obvious exhaustion', 'worn me out', 'need more than a moment',
+        'when it finally subsided', 'both panting', 'spent', 'sprawled spent',
+        'ears drooping with exhaustion', 'exhausted grin', 'slow exhausted grin',
     ],
     remorse: [
         'remorse', 'remorseful', 'sorry', 'apologized', 'apologetic', 'guilt', 'guilty',
@@ -305,6 +327,9 @@ export const EXPRESSION_HINTS = {
         'dominant', 'commanding', 'commanded', 'ordered', 'authoritative', 'authority',
         'took control', 'in control', 'firm voice', 'stern command', 'held your chin',
         'pinned you', 'towered over', 'uncompromising stare',
+        'i require your presence', 'require your presence', 'come to my suite alone',
+        'come in and close the door', 'close the door behind you',
+        'will not ask unnecessary questions', 'without political ties',
     ],
     awkward: [
         'awkward', 'awkwardly', 'awkward silence', 'awkward pause',
@@ -364,6 +389,8 @@ export const EXPRESSION_HINTS = {
         'immediately noticed', 'noticed their state of undress',
         'towels barely covering', 'sitting intimately close',
         'did you two', 'take a shower together', 'took a shower together',
+        'there has been a leak', 'central office', 'sealed envelope',
+        'folders and a sealed envelope', 'unnecessary questions',
     ],
     vulnerable: [
         'vulnerable', 'vulnerability', 'unguarded', 'fragile',
@@ -387,6 +414,13 @@ export const EXPRESSION_HINTS = {
         'eyes searching yours', 'i might need more than a moment',
         'laugh was weak exhausted', 'weak exhausted', 'voice was determined despite',
         'determined despite her obvious exhaustion', 'determined despite his obvious exhaustion',
+        'almost reverent', 'looked at him almost reverent', 'unguarded and absolute',
+        'want remained unguarded and absolute',
+        'faint softness', 'corners of her gaze', 'did not bother to hide completely',
+        "didn't bother to hide completely", 'usual unreadable mask softened',
+        'mask softened into something quieter', 'something quieter more personal',
+        'quieter more personal', 'voice lowered just slightly', 'i need someone',
+        'someone without political ties', 'that someone is you',
     ],
 };
 

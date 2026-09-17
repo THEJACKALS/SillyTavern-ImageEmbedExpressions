@@ -47,6 +47,8 @@ const defaultSettings = {
     apiKey: '',
     apiModel: '',
     customBaseUrl: '',
+    providerProfiles: {},
+    apiSettingsVersion: 2,
     autoConnectLastServer: false,
     catalogSort: 'name_asc',
 };
@@ -58,6 +60,50 @@ let messagePlacementCache = new Map();
 const llmEligibleMessageIds = new Set();
 
 const ADVANCED_AI_RECENT_MESSAGE_WINDOW = 2;
+const SECONDARY_EXPRESSION_FALLBACKS = {
+    admiration: ['approval', 'love', 'joy', 'optimism'],
+    amusement: ['joy', 'smug', 'wink', 'excitement'],
+    anger: ['annoyance', 'frustration', 'agitation', 'disapproval'],
+    annoyance: ['frustration', 'disapproval', 'anger', 'neutral'],
+    approval: ['pride', 'admiration', 'joy', 'neutral'],
+    caring: ['love', 'vulnerable', 'anxious', 'neutral'],
+    confusion: ['curiosity', 'surprise', 'realization', 'awkward'],
+    curiosity: ['confusion', 'surprise', 'realization', 'neutral'],
+    desire: ['arousal', 'love', 'flustered', 'horny'],
+    arousal: ['horny', 'desire', 'flustered', 'excitement'],
+    disappointment: ['sadness', 'disapproval', 'vulnerable', 'neutral'],
+    disapproval: ['annoyance', 'disappointment', 'anger', 'neutral'],
+    disgust: ['disapproval', 'annoyance', 'anger', 'neutral'],
+    embarrassment: ['flustered', 'awkward', 'nervousness', 'vulnerable'],
+    excitement: ['joy', 'surprise', 'optimism', 'amusement'],
+    fear: ['anxious', 'nervousness', 'vulnerable', 'surprise'],
+    gratitude: ['approval', 'admiration', 'joy', 'love'],
+    grief: ['sadness', 'vulnerable', 'remorse', 'neutral'],
+    joy: ['amusement', 'excitement', 'optimism', 'approval'],
+    love: ['caring', 'admiration', 'joy', 'desire'],
+    anxious: ['nervousness', 'fear', 'vulnerable', 'awkward'],
+    nervousness: ['anxious', 'awkward', 'flustered', 'fear'],
+    jealous: ['possessive', 'suspicious', 'annoyance', 'sadness'],
+    neutral: ['relief', 'approval', 'curiosity'],
+    optimism: ['joy', 'excitement', 'approval', 'neutral'],
+    pride: ['approval', 'smug', 'admiration', 'joy'],
+    smug: ['pride', 'amusement', 'approval', 'wink'],
+    realization: ['surprise', 'confusion', 'curiosity', 'neutral'],
+    relief: ['joy', 'gratitude', 'neutral', 'caring'],
+    remorse: ['sadness', 'vulnerable', 'disappointment', 'grief'],
+    sadness: ['disappointment', 'vulnerable', 'grief', 'remorse'],
+    surprise: ['realization', 'confusion', 'excitement', 'fear'],
+    wink: ['amusement', 'smug', 'joy', 'flustered'],
+    agitation: ['frustration', 'annoyance', 'anger', 'anxious'],
+    dominant: ['possessive', 'smug', 'pride', 'anger'],
+    awkward: ['embarrassment', 'nervousness', 'flustered', 'confusion'],
+    flustered: ['embarrassment', 'nervousness', 'awkward', 'desire'],
+    frustration: ['annoyance', 'agitation', 'anger', 'disappointment'],
+    horny: ['arousal', 'desire', 'flustered', 'excitement'],
+    possessive: ['jealous', 'dominant', 'suspicious', 'anger'],
+    suspicious: ['jealous', 'disapproval', 'curiosity', 'annoyance'],
+    vulnerable: ['sadness', 'anxious', 'caring', 'nervousness'],
+};
 const LEADING_CHARACTER_ACTIONS = [
     'said', 'says', 'asked', 'asks', 'replied', 'replies', 'responded', 'responds',
     'whispered', 'whispers', 'muttered', 'mutters', 'shouted', 'shouts', 'yelled', 'yells',
@@ -81,6 +127,73 @@ const autoInjectInFlight = new Set();       // guard: prevent concurrent autoInj
 const processedMessages = new WeakMap();    // track already-processed message roots (stores generation#)
 let processedMessageGeneration = 0;         // bump to invalidate all processedMessages entries
 
+function createProviderProfile(profile = {}) {
+    return {
+        apiKey: typeof profile.apiKey === 'string' ? profile.apiKey : '',
+        model: typeof profile.model === 'string' ? profile.model : '',
+        customBaseUrl: typeof profile.customBaseUrl === 'string' ? profile.customBaseUrl : '',
+        recentModels: Array.isArray(profile.recentModels)
+            ? [...new Set(profile.recentModels.map(model => String(model || '').trim()).filter(Boolean))].slice(0, 8)
+            : [],
+        usageCount: Number.isFinite(profile.usageCount) ? Math.max(0, profile.usageCount) : 0,
+        lastUsedAt: typeof profile.lastUsedAt === 'string' ? profile.lastUsedAt : '',
+    };
+}
+
+function getProviderProfile(provider, settings = ensureSettings()) {
+    if (!provider) {
+        return createProviderProfile();
+    }
+
+    settings.providerProfiles[provider] = createProviderProfile(settings.providerProfiles[provider]);
+    return settings.providerProfiles[provider];
+}
+
+function syncActiveProviderSettings(settings = ensureSettings()) {
+    const profile = getProviderProfile(settings.apiProvider, settings);
+    settings.apiKey = profile.apiKey;
+    settings.apiModel = profile.model;
+    settings.customBaseUrl = profile.customBaseUrl;
+    return profile;
+}
+
+function updateActiveProviderProfile(patch, { rememberModel = false } = {}) {
+    const settings = ensureSettings();
+    if (!settings.apiProvider) return createProviderProfile();
+
+    const profile = getProviderProfile(settings.apiProvider, settings);
+    Object.assign(profile, patch);
+
+    const model = String(profile.model || '').trim();
+    if (rememberModel && model) {
+        profile.recentModels = [model, ...profile.recentModels.filter(item => item !== model)].slice(0, 8);
+    }
+
+    syncActiveProviderSettings(settings);
+    return profile;
+}
+
+function renderModelHistory(provider = ensureSettings().apiProvider) {
+    const history = $('#image_embeds_model_history');
+    if (!history.length || !provider) return;
+
+    const profile = getProviderProfile(provider);
+    history.empty().toggle(profile.recentModels.length > 0);
+
+    for (const model of profile.recentModels) {
+        const button = $('<button type="button"></button>')
+            .text(model)
+            .attr('title', `Use ${model}`)
+            .on('click', () => {
+                updateActiveProviderProfile({ model }, { rememberModel: true });
+                setModelSelectOptions(getProviderConfig(provider)?.models || [], model, provider);
+                clearAiExpressionCache();
+                saveSettingsDebounced();
+            });
+        history.append(button);
+    }
+}
+
 function clearAiExpressionCache() {
     clearExpressionAiCache();
     messagePlacementCache.clear();
@@ -88,10 +201,14 @@ function clearAiExpressionCache() {
     processedMessageGeneration++;
 }
 
-function setModelSelectOptions(models, preferredModel = '') {
+function setModelSelectOptions(models, preferredModel = '', provider = ensureSettings().apiProvider) {
     const modelSelect = $('#image_embeds_api_model');
     const modelCustomInput = $('#image_embeds_api_model_custom');
-    const uniqueModels = [...new Set((models || []).map(model => String(model || '').trim()).filter(Boolean))];
+    const profile = getProviderProfile(provider);
+    const uniqueModels = [...new Set([
+        ...profile.recentModels,
+        ...(models || []),
+    ].map(model => String(model || '').trim()).filter(Boolean))];
 
     modelSelect.empty();
     modelSelect.append('<option value="">-- Select or type model --</option>');
@@ -119,8 +236,8 @@ function setModelSelectOptions(models, preferredModel = '') {
     modelSelect.val(resolvedModel);
     modelCustomInput.val(resolvedModel);
 
-    const settings = ensureSettings();
-    settings.apiModel = resolvedModel;
+    updateActiveProviderProfile({ model: resolvedModel });
+    renderModelHistory(provider);
 }
 
 async function refreshProviderModels(provider, { silent = true } = {}) {
@@ -130,20 +247,21 @@ async function refreshProviderModels(provider, { silent = true } = {}) {
     const settings = ensureSettings();
     const providerConfig = getProviderConfig(provider);
     const statusDiv = $('#image_embeds_connection_status');
-    const preferredModel = settings.apiModel || providerConfig?.defaultModel || '';
+    const profile = getProviderProfile(provider, settings);
+    const preferredModel = profile.model || providerConfig?.defaultModel || '';
 
     if (!silent) {
         statusDiv.html('<span style="color: #ffd93d;">Loading models...</span>');
     }
 
     try {
-        const models = await fetchProviderModels(provider, settings.apiKey, {
-            customBaseUrl: settings.customBaseUrl || undefined,
+        const models = await fetchProviderModels(provider, profile.apiKey, {
+            customBaseUrl: profile.customBaseUrl || undefined,
         });
 
         if (token !== modelFetchToken) return;
 
-        setModelSelectOptions(models, preferredModel);
+        setModelSelectOptions(models, preferredModel, provider);
 
         if (!silent) {
             const count = Array.isArray(models) ? models.length : 0;
@@ -157,7 +275,7 @@ async function refreshProviderModels(provider, { silent = true } = {}) {
     } catch (error) {
         if (token !== modelFetchToken) return;
 
-        setModelSelectOptions(providerConfig?.models || [], preferredModel);
+        setModelSelectOptions(providerConfig?.models || [], preferredModel, provider);
 
         if (!silent) {
             statusDiv.html(`<span style="color: #ff6b6b;"><i class="fa-solid fa-xmark"></i> ${error.message}</span>`);
@@ -516,18 +634,19 @@ function closeExpressionDocumentation() {
 async function restartProviderConnection({ signal } = {}) {
     const settings = ensureSettings();
     const providerConfig = getProviderConfig(settings.apiProvider);
+    const profile = getProviderProfile(settings.apiProvider, settings);
 
     if (!settings.apiProvider) {
         renderConnectionStatus('disconnected', 'Select a provider first');
         return false;
     }
 
-    if (providerRequiresApiKey(settings.apiProvider) && !settings.apiKey) {
+    if (providerRequiresApiKey(settings.apiProvider) && !profile.apiKey) {
         renderConnectionStatus('disconnected', 'This provider needs an API key');
         return false;
     }
 
-    if (providerConfig?.editable && !settings.customBaseUrl && !providerConfig.baseUrl) {
+    if (providerConfig?.editable && !profile.customBaseUrl && !providerConfig.baseUrl) {
         renderConnectionStatus('disconnected', 'Enter a base URL first');
         return false;
     }
@@ -536,17 +655,17 @@ async function restartProviderConnection({ signal } = {}) {
 
     try {
         if (settings.apiProvider === 'horde') {
-            const models = await fetchProviderModels(settings.apiProvider, settings.apiKey, {
-                customBaseUrl: settings.customBaseUrl || undefined,
+            const models = await fetchProviderModels(settings.apiProvider, profile.apiKey, {
+                customBaseUrl: profile.customBaseUrl || undefined,
             });
-            setModelSelectOptions(models, settings.apiModel || providerConfig?.defaultModel || models[0] || '');
+            setModelSelectOptions(models, profile.model || providerConfig?.defaultModel || models[0] || '', settings.apiProvider);
         } else {
             const result = await testAPIConnection(
                 settings.apiProvider,
-                settings.apiKey,
+                profile.apiKey,
                 {
-                    model: settings.apiModel || undefined,
-                    customBaseUrl: settings.customBaseUrl || undefined,
+                    model: profile.model || undefined,
+                    customBaseUrl: profile.customBaseUrl || undefined,
                     signal,
                 },
             );
@@ -560,6 +679,7 @@ async function restartProviderConnection({ signal } = {}) {
 
         if (signal?.aborted) return false;
 
+        renderModelHistory(settings.apiProvider);
         renderConnectionStatus('connected', 'Connected');
         return true;
     } catch (error) {
@@ -666,7 +786,7 @@ function migrateVulnerableEntryNames(settings) {
 
 function ensureSettings() {
     if (!extension_settings[SETTINGS_KEY] || typeof extension_settings[SETTINGS_KEY] !== 'object') {
-        extension_settings[SETTINGS_KEY] = { ...defaultSettings, characters: {} };
+        extension_settings[SETTINGS_KEY] = { ...defaultSettings, characters: {}, providerProfiles: {} };
     }
 
     if (!extension_settings[SETTINGS_KEY].characters || typeof extension_settings[SETTINGS_KEY].characters !== 'object') {
@@ -708,6 +828,32 @@ function ensureSettings() {
     if (typeof extension_settings[SETTINGS_KEY].customBaseUrl !== 'string') {
         extension_settings[SETTINGS_KEY].customBaseUrl = '';
     }
+
+    if (!extension_settings[SETTINGS_KEY].providerProfiles || typeof extension_settings[SETTINGS_KEY].providerProfiles !== 'object') {
+        extension_settings[SETTINGS_KEY].providerProfiles = {};
+    }
+
+    if (extension_settings[SETTINGS_KEY].apiSettingsVersion !== 2) {
+        const legacyProvider = extension_settings[SETTINGS_KEY].apiProvider;
+        if (legacyProvider) {
+            extension_settings[SETTINGS_KEY].providerProfiles[legacyProvider] = createProviderProfile({
+                apiKey: extension_settings[SETTINGS_KEY].apiKey,
+                model: extension_settings[SETTINGS_KEY].apiModel,
+                customBaseUrl: extension_settings[SETTINGS_KEY].customBaseUrl,
+                recentModels: extension_settings[SETTINGS_KEY].apiModel
+                    ? [extension_settings[SETTINGS_KEY].apiModel]
+                    : [],
+            });
+        }
+        extension_settings[SETTINGS_KEY].apiSettingsVersion = 2;
+        saveSettingsDebounced();
+    }
+
+    for (const [provider, profile] of Object.entries(extension_settings[SETTINGS_KEY].providerProfiles)) {
+        extension_settings[SETTINGS_KEY].providerProfiles[provider] = createProviderProfile(profile);
+    }
+
+    syncActiveProviderSettings(extension_settings[SETTINGS_KEY]);
 
     if (typeof extension_settings[SETTINGS_KEY].autoConnectLastServer !== 'boolean') {
         extension_settings[SETTINGS_KEY].autoConnectLastServer = false;
@@ -1226,7 +1372,6 @@ function scoreDetectedExpressionKeys(messageText) {
     const scores = [];
 
     for (const [key, hints] of Object.entries(EXPRESSION_HINTS)) {
-        if (!isExpressionKeyActive(key)) continue;
         let score = 0;
 
         if (key && new RegExp(`\\b${escapeRegExp(key)}\\b`, 'i').test(cleaned)) {
@@ -1248,24 +1393,22 @@ function scoreDetectedExpressionKeys(messageText) {
     return scores.sort((left, right) => right.score - left.score);
 }
 
-function hasExactExpressionEntry(entries, expressionKey) {
+function findEntryForExpressionKey(entries, expressionKey) {
     const target = normalizeName(expressionKey);
-    if (!target) return false;
+    if (!target) return null;
 
-    return (entries || []).some(entry => {
-        const expression = normalizeName(parseEntryName(entry.name).expression);
-        return expression === target;
-    });
+    return (entries || []).find(entry => getEntryExpressionKeys(entry).includes(target)) || null;
 }
 
-function findNoSpriteEntryForDetectedExpression(messageText, entries) {
-    const detected = scoreDetectedExpressionKeys(messageText)[0];
-    if (!detected) return null;
-    const characterKey = entries?.length ? getEntryCharacterKey(entries[0]) : DEFAULT_CHARACTER_GROUP;
+function findSecondaryExpressionEntry(entries, primaryExpressionKey) {
+    for (const secondaryKey of SECONDARY_EXPRESSION_FALLBACKS[normalizeName(primaryExpressionKey)] || []) {
+        const entry = findEntryForExpressionKey(entries, secondaryKey);
+        if (entry) {
+            return entry;
+        }
+    }
 
-    return hasExactExpressionEntry(entries, detected.key)
-        ? null
-        : buildNoSpriteEntry(detected.key, characterKey);
+    return null;
 }
 
 function buildNoSpritePlacementForMessage(messageText, characterKey = DEFAULT_CHARACTER_GROUP, dominance = null) {
@@ -1281,6 +1424,7 @@ function buildNoSpritePlacementForMessage(messageText, characterKey = DEFAULT_CH
 function selectEntryForCharacter(groups, characterKey, messageText) {
     const entries = groups.get(characterKey) || [];
     if (!entries.length) return null;
+    const availableEntries = entries.map(item => item.entry);
 
     const cleaned = String(messageText || '').toLowerCase().replace(/[^\w\s]/g, ' ');
 
@@ -1295,12 +1439,27 @@ function selectEntryForCharacter(groups, characterKey, messageText) {
         }
     }
 
-    const noSpriteEntry = findNoSpriteEntryForDetectedExpression(messageText, entries.map(item => item.entry));
-    if (noSpriteEntry) {
-        return noSpriteEntry;
+    const primaryExpression = scoreDetectedExpressionKeys(messageText)[0]?.key;
+    if (primaryExpression) {
+        const primaryEntry = findEntryForExpressionKey(availableEntries, primaryExpression);
+        if (primaryEntry) {
+            return primaryEntry;
+        }
+
+        if (ensureSettings().noSpriteEnabled) {
+            const noSpriteEntry = buildNoSpriteEntry(primaryExpression, characterKey);
+            if (noSpriteEntry) {
+                return noSpriteEntry;
+            }
+        } else {
+            const secondaryEntry = findSecondaryExpressionEntry(availableEntries, primaryExpression);
+            if (secondaryEntry) {
+                return secondaryEntry;
+            }
+        }
     }
 
-    const scoredEntry = scoreExpressionFromText(messageText, entries.map(item => item.entry));
+    const scoredEntry = scoreExpressionFromText(messageText, availableEntries);
     if (scoredEntry) {
         return scoredEntry;
     }
@@ -1795,6 +1954,10 @@ function getPlacementCharacterKey(placement) {
 }
 
 async function refinePlacementWithAI(placement, allEntries, messageText, dominance, characterKey) {
+    if (placement?.entry?.isNoSprite && ensureSettings().noSpriteEnabled) {
+        return placement;
+    }
+
     const targetCharacter = normalizeName(characterKey || getPlacementCharacterKey(placement));
     if (!targetCharacter || targetCharacter === DEFAULT_CHARACTER_GROUP) {
         return placement;
@@ -2626,6 +2789,202 @@ async function deleteExpressionFile(url) {
     }
 }
 
+async function convertImageFileToWebP(fileOrBase64DataUrl, quality = 0.92) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const canvas = document.createElement('canvas');
+                // Retain original resolution (width and height 1:1)
+                canvas.width = img.naturalWidth || img.width;
+                canvas.height = img.naturalHeight || img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                const webpDataUrl = canvas.toDataURL('image/webp', quality);
+                const base64Data = webpDataUrl.split(',')[1];
+                resolve({ base64Data, webpDataUrl, width: canvas.width, height: canvas.height });
+            } catch (err) {
+                reject(err);
+            }
+        };
+        img.onerror = () => reject(new Error('Failed to load image for WebP conversion'));
+
+        if (fileOrBase64DataUrl instanceof File || fileOrBase64DataUrl instanceof Blob) {
+            const reader = new FileReader();
+            reader.onload = (e) => { img.src = e.target.result; };
+            reader.onerror = reject;
+            reader.readAsDataURL(fileOrBase64DataUrl);
+        } else if (typeof fileOrBase64DataUrl === 'string') {
+            img.src = fileOrBase64DataUrl;
+        } else {
+            reject(new Error('Invalid image input source'));
+        }
+    });
+}
+
+async function backupAllExpressions() {
+    const settings = ensureSettings();
+    const charactersObj = settings.characters || {};
+    const charKeys = Object.keys(charactersObj);
+
+    if (!charKeys.length) {
+        toastr.warning('No expression entries found to backup.', 'Image Embeds');
+        return;
+    }
+
+    toastr.info('Preparing bulk backup of all expressions...', 'Image Embeds');
+
+    try {
+        if (!window.JSZip) {
+            await import('/lib/jszip.min.js');
+        }
+        const zip = new JSZip();
+
+        let totalCount = 0;
+        for (const key of charKeys) {
+            const cardData = charactersObj[key];
+            if (!cardData) continue;
+
+            const charName = (key.replace(/\.png$/i, '') || 'Unknown_Character').trim();
+
+            const charEntries = Array.isArray(cardData.entries) ? cardData.entries : [];
+            const userEntries = Array.isArray(cardData.userEntries) ? cardData.userEntries : [];
+
+            const usedNamesInChar = new Set();
+
+            const processEntry = async (entry, isUserMode) => {
+                if (!entry?.url) return;
+                try {
+                    const resp = await fetch(entry.url);
+                    if (!resp.ok) return;
+                    const blob = await resp.blob();
+
+                    let cleanExprName = (entry.name || 'expression')
+                        .trim()
+                        .replace(/[\\/:*?"<>|]/g, '_');
+
+                    if (isUserMode) {
+                        cleanExprName = `user_${cleanExprName}`;
+                    }
+
+                    let finalFileName = `${cleanExprName}.webp`;
+                    let counter = 1;
+                    while (usedNamesInChar.has(finalFileName)) {
+                        finalFileName = `${cleanExprName}_${counter}.webp`;
+                        counter++;
+                    }
+                    usedNamesInChar.add(finalFileName);
+
+                    let webpBlob = blob;
+                    if (!entry.url.endsWith('.webp') && blob.type !== 'image/webp') {
+                        const converted = await convertImageFileToWebP(blob);
+                        const byteCharacters = atob(converted.base64Data);
+                        const byteNumbers = new Array(byteCharacters.length);
+                        for (let i = 0; i < byteCharacters.length; i++) {
+                            byteNumbers[i] = byteCharacters.charCodeAt(i);
+                        }
+                        const byteArray = new Uint8Array(byteNumbers);
+                        webpBlob = new Blob([byteArray], { type: 'image/webp' });
+                    }
+
+                    zip.folder(charName).file(finalFileName, webpBlob);
+                    totalCount++;
+                } catch (err) {
+                    console.warn(`Failed to fetch/convert image for backup: ${entry.name}`, err);
+                }
+            };
+
+            for (const entry of charEntries) {
+                await processEntry(entry, false);
+            }
+            for (const entry of userEntries) {
+                await processEntry(entry, true);
+            }
+        }
+
+        if (totalCount === 0) {
+            toastr.warning('No valid images could be processed for backup.', 'Image Embeds');
+            return;
+        }
+
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const downloadUrl = URL.createObjectURL(zipBlob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `SillyTavern_Expressions_Backup_${new Date().toISOString().slice(0, 10)}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(downloadUrl);
+
+        toastr.success(`Successfully backed up ${totalCount} expression images!`, 'Image Embeds');
+    } catch (error) {
+        console.error('Failed to generate backup zip:', error);
+        toastr.error('Error creating backup archive: ' + error.message, 'Image Embeds');
+    }
+}
+
+async function convertAllExistingExpressionsToWebP() {
+    const settings = ensureSettings();
+    const charactersObj = settings.characters || {};
+    const charKeys = Object.keys(charactersObj);
+
+    if (!charKeys.length) {
+        toastr.warning('No expression entries found to convert.', 'Image Embeds');
+        return;
+    }
+
+    let convertedCount = 0;
+    toastr.info('Starting WebP conversion for existing expressions...', 'Image Embeds');
+
+    for (const key of charKeys) {
+        const cardData = charactersObj[key];
+        if (!cardData) continue;
+
+        const entriesList = [
+            ...(Array.isArray(cardData.entries) ? cardData.entries.map(e => ({ entry: e, isUser: false })) : []),
+            ...(Array.isArray(cardData.userEntries) ? cardData.userEntries.map(e => ({ entry: e, isUser: true })) : []),
+        ];
+
+        for (const { entry, isUser } of entriesList) {
+            if (!entry?.url || entry.url.endsWith('.webp')) continue;
+
+            try {
+                const folder = isUser
+                    ? `${STORAGE_FOLDER}/${normalizeName(key)}_user`
+                    : `${STORAGE_FOLDER}/${normalizeName(key)}`;
+
+                const resp = await fetch(entry.url);
+                if (!resp.ok) continue;
+                const blob = await resp.blob();
+
+                const { base64Data } = await convertImageFileToWebP(blob);
+                const slug = getStringHash(entry.originalName || entry.name || base64Data);
+                const fileName = `${Date.now()}_${slug}`;
+
+                const newUrl = await saveBase64AsFile(base64Data, folder, fileName, 'webp');
+                if (newUrl) {
+                    const oldUrl = entry.url;
+                    entry.url = newUrl;
+                    await deleteExpressionFile(oldUrl);
+                    convertedCount++;
+                }
+            } catch (err) {
+                console.warn(`Failed to convert existing expression to WebP: ${entry.name}`, err);
+            }
+        }
+    }
+
+    if (convertedCount > 0) {
+        saveSettingsDebounced();
+        renderList();
+        refreshAllMessages();
+        toastr.success(`Converted ${convertedCount} existing expression images to .webp!`, 'Image Embeds');
+    } else {
+        toastr.info('All registered existing expressions are already in .webp format.', 'Image Embeds');
+    }
+}
+
 async function addExpressionFromFile(file) {
     if (!file) return;
 
@@ -2649,9 +3008,9 @@ async function addExpressionFromFile(file) {
             folder = getCharacterFolder();
         }
 
-        const base64 = await getBase64Async(file);
-        const base64Data = base64.split(',')[1];
-        const extension = getFileExtension(file) || file.type.split('/')[1] || 'png';
+        // Convert image to WebP while keeping exact original resolution (1:1)
+        const { base64Data } = await convertImageFileToWebP(file);
+        const extension = 'webp';
         const slug = getStringHash(file.name || base64Data);
         const fileName = `${Date.now()}_${slug}`;
         const url = await saveBase64AsFile(base64Data, folder, fileName, extension);
@@ -2687,7 +3046,7 @@ async function addExpressionFromFile(file) {
         renderList();
         renderActiveExpressions();
         refreshAllMessages();
-        toastr.success('Image expression added.', 'Image Embeds');
+        toastr.success('Image expression added as .webp.', 'Image Embeds');
     } catch (error) {
         console.error('Failed to add image embed', error);
         toastr.error('An error occurred while adding the image.', 'Image Embeds');
@@ -2838,12 +3197,19 @@ async function updateAPIProviderUI(provider) {
 
     const providerConfig = getProviderConfig(provider);
     if (!providerConfig) return;
+    const settings = ensureSettings();
+    const profile = getProviderProfile(provider, settings);
+    syncActiveProviderSettings(settings);
 
     // Update provider info
     const infoDiv = $('#image_embeds_provider_info');
     let infoText = `<strong>${providerConfig.name}</strong>`;
     if (providerConfig.description) {
         infoText += ` - ${providerConfig.description}`;
+    }
+    if (profile.usageCount > 0) {
+        const lastUsed = profile.lastUsedAt ? new Date(profile.lastUsedAt).toLocaleString() : 'previously';
+        infoText += ` Used ${profile.usageCount} time${profile.usageCount === 1 ? '' : 's'}; last successful use: ${lastUsed}.`;
     }
     infoDiv.html(infoText);
 
@@ -2855,7 +3221,7 @@ async function updateAPIProviderUI(provider) {
     }
 
     // Update model dropdown
-    setModelSelectOptions(providerConfig.models || [], '');
+    setModelSelectOptions(providerConfig.models || [], profile.model || providerConfig.defaultModel || '', provider);
 
     // Show/hide model container
     $('#image_embeds_model_container').show();
@@ -2879,22 +3245,23 @@ async function updateAPIProviderUI(provider) {
     );
 
     // Load saved model if exists
-    const settings = ensureSettings();
-    if (settings.apiModel) {
-        $('#image_embeds_api_model').val(settings.apiModel);
-        $('#image_embeds_api_model_custom').val(settings.apiModel);
+    if (profile.model) {
+        $('#image_embeds_api_model').val(profile.model);
+        $('#image_embeds_api_model_custom').val(profile.model);
     } else if (providerConfig.defaultModel) {
-        settings.apiModel = providerConfig.defaultModel;
+        updateActiveProviderProfile({ model: providerConfig.defaultModel });
         $('#image_embeds_api_model').val(providerConfig.defaultModel);
         $('#image_embeds_api_model_custom').val(providerConfig.defaultModel);
     }
 
     if (providerConfig.editable) {
-        $('#image_embeds_custom_baseurl').val(settings.customBaseUrl || '');
+        $('#image_embeds_custom_baseurl').val(profile.customBaseUrl || '');
         $('#image_embeds_custom_baseurl').attr('placeholder', providerConfig.baseUrl || 'e.g., http://localhost:11434/v1');
     } else {
         $('#image_embeds_custom_baseurl').val('');
     }
+    $('#image_embeds_api_key').val(profile.apiKey || '');
+    renderModelHistory(provider);
 
     await refreshProviderModels(provider, { silent: true });
 }
@@ -2952,13 +3319,9 @@ function bindUi() {
     // API Provider Selection
     $('#image_embeds_api_provider').on('change', (event) => {
         const provider = event.target.value;
-        const providerConfig = getProviderConfig(provider);
-        ensureSettings().apiProvider = provider;
-        ensureSettings().apiModel = '';
-        if (!providerConfig?.editable) {
-            ensureSettings().customBaseUrl = '';
-            $('#image_embeds_custom_baseurl').val('');
-        }
+        const settings = ensureSettings();
+        settings.apiProvider = provider;
+        syncActiveProviderSettings(settings);
         clearAiExpressionCache();
 
         renderConnectionStatus('disconnected', provider ? 'Disconnected' : 'Select a provider first');
@@ -2980,8 +3343,9 @@ function bindUi() {
     // API Model Selection
     $('#image_embeds_api_model').on('change', (event) => {
         const model = event.target.value;
-        ensureSettings().apiModel = model;
+        updateActiveProviderProfile({ model }, { rememberModel: true });
         $('#image_embeds_api_model_custom').val(model);
+        renderModelHistory();
         clearAiExpressionCache();
         saveSettingsDebounced();
     });
@@ -2989,14 +3353,19 @@ function bindUi() {
     // API Model Custom Input
     $('#image_embeds_api_model_custom').on('input', (event) => {
         const model = event.target.value;
-        ensureSettings().apiModel = model;
+        updateActiveProviderProfile({ model });
         clearAiExpressionCache();
+        saveSettingsDebounced();
+    });
+    $('#image_embeds_api_model_custom').on('change', (event) => {
+        updateActiveProviderProfile({ model: event.target.value }, { rememberModel: true });
+        renderModelHistory();
         saveSettingsDebounced();
     });
 
     // Custom Base URL Input
     $('#image_embeds_custom_baseurl').on('input', (event) => {
-        ensureSettings().customBaseUrl = event.target.value;
+        updateActiveProviderProfile({ customBaseUrl: event.target.value });
         clearAiExpressionCache();
         const provider = ensureSettings().apiProvider;
         if (provider) {
@@ -3007,7 +3376,7 @@ function bindUi() {
 
     // API Key Input
     $('#image_embeds_api_key').on('input', (event) => {
-        ensureSettings().apiKey = event.target.value;
+        updateActiveProviderProfile({ apiKey: event.target.value });
         clearAiExpressionCache();
         const provider = ensureSettings().apiProvider;
         if (provider) {
@@ -3095,6 +3464,26 @@ function bindUi() {
         button.prop('disabled', true);
         try {
             await regenerateCurrentCharacterExpressions();
+        } finally {
+            button.prop('disabled', false);
+        }
+    });
+
+    $('#image_embeds_backup_all').on('click', async () => {
+        const button = $('#image_embeds_backup_all');
+        button.prop('disabled', true);
+        try {
+            await backupAllExpressions();
+        } finally {
+            button.prop('disabled', false);
+        }
+    });
+
+    $('#image_embeds_convert_all_webp').on('click', async () => {
+        const button = $('#image_embeds_convert_all_webp');
+        button.prop('disabled', true);
+        try {
+            await convertAllExistingExpressionsToWebP();
         } finally {
             button.prop('disabled', false);
         }
